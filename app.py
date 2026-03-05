@@ -565,6 +565,22 @@ def add_to_accumulated_beznal(amount: float):
     conn.commit()
     conn.close()
 
+def set_accumulated_beznal(amount: float):
+    """Устанавливает новое значение накопленного безнала"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        """
+        UPDATE accumulated_beznal
+        SET total_amount = ?, last_updated = ?
+        WHERE driver_id = 1
+        """,
+        (amount, now),
+    )
+    conn.commit()
+    conn.close()
+
 def get_last_fuel_params():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -1177,10 +1193,10 @@ def show_admin_page():
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📥 ИМПОРТ", 
         "🔄 ПЕРЕСЧЁТ", 
+        "✏️ БЕЗНАЛ", 
         "🗄 БЭКАПЫ", 
         "💾 АРХИВ", 
-        "🔧 ИНСТРУМЕНТЫ", 
-        "⚠️ СБРОС"
+        "🔧 ИНСТРУМЕНТЫ"
     ])
     
     with tab1:
@@ -1225,6 +1241,59 @@ def show_admin_page():
             st.error(f"Ошибка: {e}")
     
     with tab3:
+        st.header("✏️ ИЗМЕНЕНИЕ НАКОПЛЕННОГО БЕЗНАЛА")
+        
+        # Получаем текущее значение
+        current = get_accumulated_beznal()
+        
+        # Показываем текущее значение
+        st.metric("Текущее значение", f"{current:.0f} ₽")
+        
+        # Создаём форму для изменения
+        with st.form("change_beznal_form"):
+            st.markdown("---")
+            st.subheader("Установить новое значение")
+            
+            new_value = st.number_input(
+                "Новое значение накопленного безнала, ₽",
+                min_value=None,
+                step=100.0,
+                format="%.0f",
+                value=float(current),
+                help="Введите новое значение (можно отрицательное)"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                save_btn = st.form_submit_button("💾 СОХРАНИТЬ", use_container_width=True, type="primary")
+            with col2:
+                reset_btn = st.form_submit_button("🔄 СБРОСИТЬ", use_container_width=True)
+        
+        if save_btn:
+            set_accumulated_beznal(new_value)
+            st.success(f"✅ Новое значение сохранено: {new_value:.0f} ₽")
+            log_action("Изменение безнала", f"Установлено значение {new_value:.0f} ₽")
+            st.rerun()
+        
+        if reset_btn:
+            # Сбрасываем на 0
+            set_accumulated_beznal(0)
+            st.success(f"✅ Значение сброшено на 0 ₽")
+            log_action("Сброс безнала", "Установлено значение 0 ₽")
+            st.rerun()
+        
+        st.divider()
+        
+        # Информация о безнале
+        st.info("""
+        **О накопленном безнале:**
+        - При заказах по карте сумма добавляется в безнал
+        - При заказах наличными комиссия списывается с безнала
+        - Вы можете вручную корректировать значение
+        - Отрицательные значения допустимы
+        """)
+    
+    with tab4:
         st.header("🗄 УПРАВЛЕНИЕ БЭКАПАМИ")
         
         # Кнопка создания бэкапа
@@ -1291,7 +1360,7 @@ def show_admin_page():
                     
                     st.divider()
     
-    with tab4:
+    with tab5:
         st.header("💾 ЗАГРУЗКА БЭКАПА С ДИСКА")
         
         st.markdown("""
@@ -1343,33 +1412,30 @@ def show_admin_page():
         ⚠️ **Важно**: При восстановлении автоматически создаётся бэкап текущей базы
         """)
     
-    with tab5:
+    with tab6:
         st.header("🔧 ИНСТРУМЕНТЫ")
         try:
-            from pages_imports import normalize_shift_dates
+            from pages_imports import normalize_shift_dates, reset_db
             if st.button("🛠 ИСПРАВИТЬ ФОРМАТ ДАТ", width='stretch'):
                 fixed, skipped = normalize_shift_dates()
                 st.success(f"✅ Исправлено дат: {fixed}, без изменений: {skipped}")
-        except Exception as e:
-            st.error(f"Ошибка: {e}")
-    
-    with tab6:
-        st.header("⚠️ ОПАСНАЯ ЗОНА")
-        st.error("🚨 Полный сброс базы удалит все данные!")
-        
-        confirm = st.checkbox("Я понимаю, что все данные будут удалены")
-        confirm2 = st.checkbox("Я сделал бэкап")
-        
-        if confirm and confirm2:
-            if st.button("🗑 УДАЛИТЬ БАЗУ", type="primary", width='stretch'):
-                try:
-                    from pages_imports import reset_db
+            
+            st.divider()
+            
+            st.subheader("⚠️ ОПАСНАЯ ЗОНА")
+            st.error("🚨 Полный сброс базы удалит все данные!")
+            
+            confirm = st.checkbox("Я понимаю, что все данные будут удалены")
+            confirm2 = st.checkbox("Я сделал бэкап")
+            
+            if confirm and confirm2:
+                if st.button("🗑 УДАЛИТЬ БАЗУ", type="primary", width='stretch'):
                     reset_db()
                     st.success("✅ База сброшена")
                     st.cache_data.clear()
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Ошибка: {e}")
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
 
 # ===== UI / ЗАПУСК =====
 st.set_page_config(
@@ -1452,6 +1518,10 @@ with st.sidebar:
             db_size = os.path.getsize(db_path) / 1024
             st.caption(f"📦 Размер: {db_size:.1f} KB")
             
+        # Показываем текущий безнал
+        acc = get_accumulated_beznal()
+        st.metric("💰 Накопленный безнал", f"{acc:.0f} ₽")
+        
         # Показываем количество бэкапов
         backups = list_backups()
         st.caption(f"💾 Бэкапов: {len(backups)}")
