@@ -4,6 +4,8 @@ from datetime import datetime, date, timezone, timedelta
 import hashlib
 import os
 import pandas as pd
+import shutil
+import io
 
 # ===== НАСТРОЙКИ =====
 AUTH_DB = "users.db"  # база с пользователями (логин/пароль)
@@ -107,6 +109,14 @@ def apply_custom_css():
             border-radius: 0.5rem;
             margin: 0.5rem 0;
         }
+        .success-box {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+        }
         /* Стили для кнопок навигации */
         div.row-widget.stButton > button {
             text-align: left;
@@ -125,6 +135,17 @@ def apply_custom_css():
             background-color: #bfdbfe;
             border-color: #93c5fd;
             font-weight: 600;
+        }
+        /* Стили для загрузки файлов */
+        .stFileUploader {
+            border: 1px dashed #cbd5e1;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            background-color: white;
+        }
+        .stFileUploader:hover {
+            border-color: #93c5fd;
+            background-color: #f8fafc;
         }
         </style>
         """,
@@ -159,6 +180,14 @@ def get_current_db_name() -> str:
     safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
     db_path = os.path.join(user_dir, f"taxi_{safe_name}.db")
     return db_path
+
+def get_backup_dir() -> str:
+    """Возвращает путь к папке бэкапов пользователя."""
+    user_dir = get_user_dir(st.session_state.get("username", "unknown"))
+    backup_dir = os.path.join(user_dir, "backups")
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+    return backup_dir
 
 def check_and_create_tables():
     """Проверяет и создаёт все необходимые таблицы в базе данных"""
@@ -584,6 +613,88 @@ def log_action(action: str, details: str = ""):
             f.write(f"[{timestamp}] {username}: {action} - {details}\n")
     except:
         pass
+
+# ===== ФУНКЦИИ ДЛЯ БЭКАПОВ =====
+def create_backup() -> str:
+    """Создаёт бэкап базы данных в папке пользователя."""
+    backup_dir = get_backup_dir()
+    timestamp = datetime.now(MOSCOW_TZ).strftime("%Y%m%d_%H%M%S")
+    username = st.session_state.get("username", "unknown")
+    backup_name = f"taxi_{username}_backup_{timestamp}.db"
+    backup_path = os.path.join(backup_dir, backup_name)
+    
+    # Копируем текущую базу
+    shutil.copy2(get_current_db_name(), backup_path)
+    
+    # Ограничиваем количество бэкапов (оставляем последние 20)
+    backups = [f for f in os.listdir(backup_dir) if f.endswith('.db')]
+    backups.sort(reverse=True)
+    for old_backup in backups[20:]:
+        try:
+            os.remove(os.path.join(backup_dir, old_backup))
+        except:
+            pass
+    
+    return backup_path
+
+def list_backups() -> list:
+    """Возвращает список всех бэкапов пользователя."""
+    backup_dir = get_backup_dir()
+    if not os.path.exists(backup_dir):
+        return []
+    
+    backups = []
+    for f in os.listdir(backup_dir):
+        if f.endswith('.db'):
+            file_path = os.path.join(backup_dir, f)
+            file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            file_size = os.path.getsize(file_path) / 1024  # в KB
+            backups.append({
+                'name': f,
+                'path': file_path,
+                'time': file_time,
+                'size': file_size
+            })
+    
+    # Сортируем по времени (новые сверху)
+    backups.sort(key=lambda x: x['time'], reverse=True)
+    return backups
+
+def restore_from_backup(backup_path: str):
+    """Восстанавливает базу данных из бэкапа."""
+    if not os.path.exists(backup_path):
+        raise FileNotFoundError(f"Файл бэкапа не найден: {backup_path}")
+    
+    # Сначала создаём бэкап текущей базы
+    create_backup()
+    
+    # Затем восстанавливаем выбранный бэкап
+    shutil.copy2(backup_path, get_current_db_name())
+
+def download_backup(backup_path: str) -> bytes:
+    """Подготавливает файл бэкапа для скачивания."""
+    with open(backup_path, 'rb') as f:
+        return f.read()
+
+def upload_and_restore_backup(uploaded_file):
+    """Загружает бэкап с диска и восстанавливает."""
+    if uploaded_file is not None:
+        # Создаём временный файл
+        temp_path = os.path.join(get_backup_dir(), "temp_restore.db")
+        with open(temp_path, 'wb') as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # Восстанавливаем из временного файла
+        restore_from_backup(temp_path)
+        
+        # Удаляем временный файл
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+        
+        return True
+    return False
 
 # ===== ФУНКЦИИ ДЛЯ СТРАНИЦ =====
 def show_main_page():
@@ -1062,45 +1173,47 @@ def show_admin_page():
                 st.error("❌ Неверный пароль")
         return
     
-    # Импортируем функции из pages_imports.py
-    try:
-        from pages_imports import (
-            get_accumulated_beznal,
-            recalc_full_db,
-            import_from_excel,
-            import_from_gsheet,
-            create_backup,
-            list_backups,
-            restore_backup,
-            reset_db,
-            normalize_shift_dates
-        )
+    # Создаём вкладки
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📥 ИМПОРТ", 
+        "🔄 ПЕРЕСЧЁТ", 
+        "🗄 БЭКАПЫ", 
+        "💾 АРХИВ", 
+        "🔧 ИНСТРУМЕНТЫ", 
+        "⚠️ СБРОС"
+    ])
+    
+    with tab1:
+        st.header("📥 ИМПОРТ ДАННЫХ")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📥 ИМПОРТ", "🔄 ПЕРЕСЧЁТ", "🗄 БЭКАПЫ", "🔧 ИНСТРУМЕНТЫ", "⚠️ СБРОС"
-        ])
-        
-        with tab1:
-            st.header("📥 ИМПОРТ ДАННЫХ")
-            
-            with st.expander("📄 Импорт из Google Sheets", expanded=False):
-                sheet_url = st.text_input("Ссылка на Google Sheets")
-                if st.button("🚀 ИМПОРТИРОВАТЬ", width='stretch'):
-                    with st.spinner("Импортируем..."):
+        with st.expander("📄 Импорт из Google Sheets", expanded=False):
+            sheet_url = st.text_input("Ссылка на Google Sheets")
+            if st.button("🚀 ИМПОРТИРОВАТЬ", width='stretch'):
+                with st.spinner("Импортируем..."):
+                    try:
+                        from pages_imports import import_from_gsheet
                         imported = import_from_gsheet(sheet_url)
                         if imported > 0:
                             st.success(f"✅ Импортировано {imported} заказов")
-            
-            with st.expander("📂 Импорт из файла", expanded=True):
-                uploaded_file = st.file_uploader("Выберите файл", type=["xlsx", "xls", "csv"])
-                if uploaded_file and st.button("📤 ИМПОРТИРОВАТЬ", width='stretch'):
-                    with st.spinner("Импортируем..."):
+                    except Exception as e:
+                        st.error(f"Ошибка: {e}")
+        
+        with st.expander("📂 Импорт из файла", expanded=True):
+            uploaded_file = st.file_uploader("Выберите файл", type=["xlsx", "xls", "csv"])
+            if uploaded_file and st.button("📤 ИМПОРТИРОВАТЬ", width='stretch'):
+                with st.spinner("Импортируем..."):
+                    try:
+                        from pages_imports import import_from_excel
                         imported = import_from_excel(uploaded_file)
                         if imported > 0:
                             st.success(f"✅ Импортировано {imported} заказов")
-        
-        with tab2:
-            st.header("🔄 ПЕРЕСЧЁТ ДАННЫХ")
+                    except Exception as e:
+                        st.error(f"Ошибка: {e}")
+    
+    with tab2:
+        st.header("🔄 ПЕРЕСЧЁТ ДАННЫХ")
+        try:
+            from pages_imports import get_accumulated_beznal, recalc_full_db
             current = get_accumulated_beznal()
             st.metric("Текущий безнал", f"{current:.0f} ₽")
             
@@ -1108,55 +1221,155 @@ def show_admin_page():
                 with st.spinner("Пересчитываем..."):
                     new_total = recalc_full_db()
                     st.success(f"✅ Пересчёт завершён. Новый безнал: {new_total:.0f} ₽")
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
+    
+    with tab3:
+        st.header("🗄 УПРАВЛЕНИЕ БЭКАПАМИ")
         
-        with tab3:
-            st.header("🗄 БЭКАПЫ")
-            col1, col2 = st.columns(2)
+        # Кнопка создания бэкапа
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📦 СОЗДАТЬ БЭКАП", width='stretch', type="primary"):
+                with st.spinner("Создаём бэкап..."):
+                    backup_path = create_backup()
+                    backup_size = os.path.getsize(backup_path) / 1024
+                    st.success(f"✅ Бэкап создан: {os.path.basename(backup_path)}")
+                    st.caption(f"📁 Папка: {os.path.dirname(backup_path)}")
+                    st.caption(f"📦 Размер: {backup_size:.1f} KB")
+        
+        with col2:
+            st.info(f"📁 Папка бэкапов: {os.path.basename(get_backup_dir())}")
+        
+        # Список существующих бэкапов
+        st.subheader("📋 СУЩЕСТВУЮЩИЕ БЭКАПЫ")
+        backups = list_backups()
+        
+        if not backups:
+            st.info("📭 Пока нет ни одного бэкапа")
+        else:
+            for backup in backups:
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+                    
+                    with col1:
+                        st.markdown(f"**{backup['name']}**")
+                        st.caption(f"🕒 {backup['time'].strftime('%d.%m.%Y %H:%M:%S')} | 📦 {backup['size']:.1f} KB")
+                    
+                    with col2:
+                        # Кнопка скачивания
+                        backup_data = download_backup(backup['path'])
+                        st.download_button(
+                            label="📥",
+                            data=backup_data,
+                            file_name=backup['name'],
+                            mime="application/octet-stream",
+                            help="Скачать бэкап на диск",
+                            key=f"download_{backup['name']}"
+                        )
+                    
+                    with col3:
+                        # Кнопка восстановления
+                        if st.button("🔄", key=f"restore_{backup['name']}", help="Восстановить из этого бэкапа"):
+                            try:
+                                restore_from_backup(backup['path'])
+                                st.success("✅ База восстановлена")
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Ошибка: {e}")
+                    
+                    with col4:
+                        # Кнопка удаления
+                        if st.button("🗑", key=f"delete_{backup['name']}", help="Удалить бэкап"):
+                            try:
+                                os.remove(backup['path'])
+                                st.success(f"✅ Бэкап удалён")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Ошибка: {e}")
+                    
+                    st.divider()
+    
+    with tab4:
+        st.header("💾 ЗАГРУЗКА БЭКАПА С ДИСКА")
+        
+        st.markdown("""
+        <div class="info-box">
+        Вы можете загрузить ранее сохранённый бэкап с диска и восстановить базу данных.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        uploaded_backup = st.file_uploader(
+            "Выберите файл бэкапа (.db)",
+            type=["db"],
+            help="Выберите файл бэкапа, который вы ранее скачали на диск"
+        )
+        
+        if uploaded_backup is not None:
+            file_size = len(uploaded_backup.getbuffer()) / 1024
+            st.caption(f"📦 Файл: {uploaded_backup.name} | Размер: {file_size:.1f} KB")
             
+            col1, col2 = st.columns(2)
             with col1:
-                if st.button("📦 СОЗДАТЬ БЭКАП", width='stretch'):
-                    try:
-                        path = create_backup()
-                        st.success(f"✅ Бэкап создан: {os.path.basename(path)}")
-                    except Exception as e:
-                        st.error(f"Ошибка: {e}")
+                if st.button("✅ ВОССТАНОВИТЬ ИЗ ЭТОГО ФАЙЛА", width='stretch', type="primary"):
+                    with st.spinner("Восстанавливаем базу..."):
+                        try:
+                            # Создаём бэкап текущей базы
+                            create_backup()
+                            
+                            # Загружаем и восстанавливаем
+                            if upload_and_restore_backup(uploaded_backup):
+                                st.success("✅ База успешно восстановлена из загруженного файла")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ Ошибка при восстановлении")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка: {e}")
             
             with col2:
-                backups = list_backups()
-                if backups:
-                    labels = [lbl for lbl, _ in backups]
-                    selected = st.selectbox("Выберите бэкап", labels)
-                    
-                    if st.button("🔄 ВОССТАНОВИТЬ", width='stretch'):
-                        try:
-                            restore_backup(dict(backups)[selected])
-                            st.success("✅ База восстановлена")
-                            st.cache_data.clear()
-                        except Exception as e:
-                            st.error(f"Ошибка: {e}")
+                if st.button("❌ ОТМЕНА", width='stretch'):
+                    st.rerun()
         
-        with tab4:
-            st.header("🔧 ИНСТРУМЕНТЫ")
+        st.divider()
+        
+        st.subheader("📋 ИНСТРУКЦИЯ")
+        st.markdown("""
+        1. **Скачивание бэкапа**: Нажмите кнопку 📥 рядом с нужным бэкапом во вкладке "БЭКАПЫ"
+        2. **Сохранение**: Файл сохранится на вашем компьютере
+        3. **Восстановление**: Выберите сохранённый файл выше и нажмите "ВОССТАНОВИТЬ"
+        
+        ⚠️ **Важно**: При восстановлении автоматически создаётся бэкап текущей базы
+        """)
+    
+    with tab5:
+        st.header("🔧 ИНСТРУМЕНТЫ")
+        try:
+            from pages_imports import normalize_shift_dates
             if st.button("🛠 ИСПРАВИТЬ ФОРМАТ ДАТ", width='stretch'):
                 fixed, skipped = normalize_shift_dates()
                 st.success(f"✅ Исправлено дат: {fixed}, без изменений: {skipped}")
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
+    
+    with tab6:
+        st.header("⚠️ ОПАСНАЯ ЗОНА")
+        st.error("🚨 Полный сброс базы удалит все данные!")
         
-        with tab5:
-            st.header("⚠️ ОПАСНАЯ ЗОНА")
-            st.error("🚨 Полный сброс базы удалит все данные!")
-            
-            confirm = st.checkbox("Я понимаю, что все данные будут удалены")
-            confirm2 = st.checkbox("Я сделал бэкап")
-            
-            if confirm and confirm2:
-                if st.button("🗑 УДАЛИТЬ БАЗУ", type="primary", width='stretch'):
+        confirm = st.checkbox("Я понимаю, что все данные будут удалены")
+        confirm2 = st.checkbox("Я сделал бэкап")
+        
+        if confirm and confirm2:
+            if st.button("🗑 УДАЛИТЬ БАЗУ", type="primary", width='stretch'):
+                try:
+                    from pages_imports import reset_db
                     reset_db()
                     st.success("✅ База сброшена")
                     st.cache_data.clear()
-        
-    except ImportError as e:
-        st.error(f"Ошибка загрузки модуля администрирования: {e}")
-        st.info("Убедитесь, что файл pages_imports.py существует в корневой папке")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Ошибка: {e}")
 
 # ===== UI / ЗАПУСК =====
 st.set_page_config(
@@ -1238,6 +1451,10 @@ with st.sidebar:
         if os.path.exists(db_path):
             db_size = os.path.getsize(db_path) / 1024
             st.caption(f"📦 Размер: {db_size:.1f} KB")
+            
+        # Показываем количество бэкапов
+        backups = list_backups()
+        st.caption(f"💾 Бэкапов: {len(backups)}")
     except:
         pass
     
