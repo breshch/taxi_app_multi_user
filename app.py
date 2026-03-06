@@ -10,6 +10,7 @@ import io
 # ===== НАСТРОЙКИ =====
 AUTH_DB = "users.db"  # база с пользователями (логин/пароль)
 USERS_DIR = "users"    # папка для хранения данных пользователей
+SESSION_TIMEOUT = 5 * 60 * 60  # 5 часов в секундах
 
 rate_nal = 0.78   # процент для нала (для расчёта комиссии)
 rate_card = 0.75  # процент для карты
@@ -136,6 +137,24 @@ def apply_custom_css():
             border-color: #93c5fd;
             font-weight: 600;
         }
+        /* Стили для кнопки обновления */
+        .refresh-button {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 999;
+            background-color: #3b82f6;
+            color: white;
+            border-radius: 50px;
+            padding: 10px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .refresh-button:hover {
+            background-color: #2563eb;
+        }
         /* Стили для загрузки файлов */
         .stFileUploader {
             border: 1px dashed #cbd5e1;
@@ -147,10 +166,56 @@ def apply_custom_css():
             border-color: #93c5fd;
             background-color: #f8fafc;
         }
+        /* Стили для таймера сессии */
+        .session-timer {
+            font-size: 0.8rem;
+            color: #64748b;
+            text-align: center;
+            margin-top: 1rem;
+            padding: 0.5rem;
+            border-top: 1px solid #e2e8f0;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+# ===== УПРАВЛЕНИЕ СЕССИЕЙ =====
+def init_session():
+    """Инициализирует сессию пользователя с таймером"""
+    if "session_start" not in st.session_state:
+        st.session_state.session_start = datetime.now(MOSCOW_TZ)
+        st.session_state.last_activity = datetime.now(MOSCOW_TZ)
+    
+    # Обновляем время последней активности
+    st.session_state.last_activity = datetime.now(MOSCOW_TZ)
+    
+    # Проверяем, не истекла ли сессия
+    time_elapsed = (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds()
+    if time_elapsed > SESSION_TIMEOUT:
+        # Сессия истекла, выходим
+        st.session_state.clear()
+        st.warning("⏰ Сессия истекла. Пожалуйста, войдите снова.")
+        st.rerun()
+
+def get_session_time_remaining() -> str:
+    """Возвращает оставшееся время сессии в формате ЧЧ:ММ:СС"""
+    if "session_start" not in st.session_state:
+        return "00:00:00"
+    
+    time_elapsed = (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds()
+    time_remaining = max(0, SESSION_TIMEOUT - time_elapsed)
+    
+    hours = int(time_remaining // 3600)
+    minutes = int((time_remaining % 3600) // 60)
+    seconds = int(time_remaining % 60)
+    
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+# ===== ФУНКЦИЯ ОБНОВЛЕНИЯ СТРАНИЦЫ =====
+def refresh_page():
+    """Обновляет текущую страницу"""
+    st.rerun()
 
 # ===== РАБОТА С ПАПКАМИ ПОЛЬЗОВАТЕЛЕЙ =====
 def ensure_users_dir():
@@ -256,8 +321,11 @@ def get_auth_conn():
     return sqlite3.connect(AUTH_DB)
 
 def init_auth_db():
+    """Инициализирует таблицу пользователей с правильной структурой"""
     conn = get_auth_conn()
     cur = conn.cursor()
+    
+    # Создаём таблицу с правильной структурой
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -265,10 +333,24 @@ def init_auth_db():
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             created_at TEXT,
-            user_dir TEXT
+            user_dir TEXT,
+            last_login TEXT,
+            total_logins INTEGER DEFAULT 0
         )
         """
     )
+    
+    # Проверяем и добавляем недостающие колонки
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+    
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN total_logins INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+    
     conn.commit()
     conn.close()
 
@@ -288,14 +370,16 @@ def register_user(username: str, password: str) -> bool:
     try:
         cur.execute(
             """
-            INSERT INTO users (username, password_hash, created_at, user_dir)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO users (username, password_hash, created_at, user_dir, last_login, total_logins)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 username,
                 hash_password(password),
                 datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),
                 user_dir,
+                None,  # last_login пока пустой
+                0,     # total_logins начинается с 0
             ),
         )
         conn.commit()
@@ -315,6 +399,9 @@ def register_user(username: str, password: str) -> bool:
         
     except sqlite3.IntegrityError:
         ok = False
+    except Exception as e:
+        print(f"Ошибка при регистрации: {e}")
+        ok = False
     finally:
         conn.close()
     return ok
@@ -329,6 +416,58 @@ def authenticate_user(username: str, password: str) -> bool:
     if not row:
         return False
     return row[0] == hash_password(password)
+
+def update_login_stats(username: str):
+    """Обновляет статистику входа пользователя."""
+    conn = get_auth_conn()
+    cur = conn.cursor()
+    now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        # Проверяем существование колонок
+        cur.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in cur.fetchall()]
+        
+        if 'last_login' in columns and 'total_logins' in columns:
+            cur.execute(
+                """
+                UPDATE users 
+                SET last_login = ?, total_logins = total_logins + 1 
+                WHERE username = ?
+                """,
+                (now, username),
+            )
+        else:
+            # Если колонок нет, просто логируем в консоль
+            print(f"Вход пользователя {username} в {now} (статистика не сохранена)")
+    except Exception as e:
+        print(f"Ошибка при обновлении статистики: {e}")
+    finally:
+        conn.commit()
+        conn.close()
+
+def get_all_users() -> list:
+    """Возвращает список всех пользователей."""
+    conn = get_auth_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT 
+                username, 
+                COALESCE(created_at, 'неизвестно') as created_at,
+                COALESCE(last_login, 'никогда') as last_login,
+                COALESCE(total_logins, 0) as total_logins 
+            FROM users 
+            ORDER BY username
+        """)
+        rows = cur.fetchall()
+    except:
+        # Если структура таблицы старая, возвращаем базовую информацию
+        cur.execute("SELECT username, created_at FROM users ORDER BY username")
+        rows = [(row[0], row[1], 'неизвестно', 0) for row in cur.fetchall()]
+    finally:
+        conn.close()
+    return rows
 
 # ===== ФУНКЦИИ БД ДЛЯ СМЕН И ЗАКАЗОВ =====
 def get_db_connection():
@@ -1446,8 +1585,11 @@ st.set_page_config(
 )
 
 apply_custom_css()
-init_auth_db()
+init_auth_db()  # Инициализируем БД пользователей с правильной структурой
 ensure_users_dir()
+
+# Инициализируем сессию
+init_session()
 
 # ----- ЛОГИН / РЕГИСТРАЦИЯ -----
 if "username" not in st.session_state:
@@ -1465,10 +1607,13 @@ if "username" not in st.session_state:
             if not login_username or not login_password:
                 st.error("Введите имя пользователя и пароль.")
             elif authenticate_user(login_username, login_password):
+                update_login_stats(login_username.strip())
                 st.session_state["username"] = login_username.strip()
                 st.session_state["db_name"] = get_current_db_name()
                 st.session_state["user_dir"] = get_user_dir(login_username.strip())
                 st.session_state["page"] = "main"
+                st.session_state["session_start"] = datetime.now(MOSCOW_TZ)
+                st.session_state["last_activity"] = datetime.now(MOSCOW_TZ)
                 st.success(f"✅ Добро пожаловать, {st.session_state['username']}!")
                 log_action("Вход в систему", f"Пользователь {st.session_state['username']}")
                 st.rerun()
@@ -1548,6 +1693,14 @@ with st.sidebar:
         st.rerun()
     
     st.markdown("---")
+    
+    # Кнопка обновления страницы
+    if st.button("🔄 ОБНОВИТЬ СТРАНИЦУ", width='stretch'):
+        refresh_page()
+    
+    # Информация о сессии
+    time_remaining = get_session_time_remaining()
+    st.markdown(f'<div class="session-timer">⏱️ Сессия: {time_remaining}</div>', unsafe_allow_html=True)
     
     if st.button("🚪 ВЫЙТИ", width='stretch'):
         log_action("Выход", f"Пользователь {st.session_state['username']}")
