@@ -256,65 +256,70 @@ def get_backup_dir() -> str:
 
 def check_and_create_tables():
     """Проверяет и создаёт все необходимые таблицы в базе данных"""
-    conn = sqlite3.connect(get_current_db_name())
-    cursor = conn.cursor()
-    
-    # Создаём таблицу shifts
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS shifts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL,
-            km INTEGER DEFAULT 0,
-            fuel_liters REAL DEFAULT 0,
-            fuel_price REAL DEFAULT 0,
-            is_open INTEGER DEFAULT 1,
-            opened_at TEXT,
-            closed_at TEXT
-        )
-    """)
-    
-    # Создаём таблицу orders
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            shift_id INTEGER,
-            type TEXT NOT NULL,
-            amount REAL NOT NULL,
-            tips REAL DEFAULT 0,
-            commission REAL NOT NULL,
-            total REAL NOT NULL,
-            beznal_added REAL DEFAULT 0,
-            order_time TEXT
-        )
-    """)
-    
-    # Добавляем колонку order_time, если её нет
     try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN order_time TEXT")
-    except sqlite3.OperationalError:
-        pass
-    
-    # Создаём таблицу accumulated_beznal
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS accumulated_beznal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            driver_id INTEGER DEFAULT 1,
-            total_amount REAL DEFAULT 0,
-            last_updated TEXT
-        )
-    """)
-    
-    # Добавляем начальную запись в accumulated_beznal
-    cursor.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
-    if not cursor.fetchone():
-        cursor.execute(
-            "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) "
-            "VALUES (1, 0, ?)",
-            (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),),
-        )
-    
-    conn.commit()
-    conn.close()
+        conn = sqlite3.connect(get_current_db_name())
+        cursor = conn.cursor()
+        
+        # Создаём таблицу shifts
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS shifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                km INTEGER DEFAULT 0,
+                fuel_liters REAL DEFAULT 0,
+                fuel_price REAL DEFAULT 0,
+                is_open INTEGER DEFAULT 1,
+                opened_at TEXT,
+                closed_at TEXT
+            )
+        """)
+        
+        # Создаём таблицу orders
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shift_id INTEGER,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                tips REAL DEFAULT 0,
+                commission REAL NOT NULL,
+                total REAL NOT NULL,
+                beznal_added REAL DEFAULT 0,
+                order_time TEXT
+            )
+        """)
+        
+        # Добавляем колонку order_time, если её нет
+        try:
+            cursor.execute("ALTER TABLE orders ADD COLUMN order_time TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        # Создаём таблицу accumulated_beznal
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS accumulated_beznal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                driver_id INTEGER DEFAULT 1,
+                total_amount REAL DEFAULT 0,
+                last_updated TEXT
+            )
+        """)
+        
+        # Добавляем начальную запись в accumulated_beznal
+        cursor.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) "
+                "VALUES (1, 0, ?)",
+                (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),),
+            )
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка при создании таблиц: {e}")
+        return False
 
 # ===== АВТОРИЗАЦИЯ (users.db) =====
 def get_auth_conn():
@@ -648,7 +653,7 @@ def get_shift_orders(shift_id):
         SELECT id, type, amount, tips, commission, total, beznal_added, order_time
         FROM orders
         WHERE shift_id = ?
-        ORDER BY id
+        ORDER BY id DESC  -- Изменено: теперь новые записи сверху
         """,
         (shift_id,),
     )
@@ -900,6 +905,16 @@ def show_main_page():
 
         # ===== ДОБАВЛЕНИЕ ЗАКАЗА =====
         with st.expander("➕ ДОБАВИТЬ ЗАКАЗ", expanded=True):
+            # Используем счётчики для создания уникальных ключей
+            if "amount_counter" not in st.session_state:
+                st.session_state.amount_counter = 0
+            if "tips_counter" not in st.session_state:
+                st.session_state.tips_counter = 0
+            
+            # Создаём уникальные ключи для полей
+            amount_key = f"amount_{st.session_state.amount_counter}"
+            tips_key = f"tips_{st.session_state.tips_counter}"
+            
             with st.form("order_form"):
                 c1, c2 = st.columns(2)
                 with c1:
@@ -907,14 +922,20 @@ def show_main_page():
                         "Сумма заказа, ₽",
                         value="",
                         placeholder="например, 650",
+                        key=amount_key
                     )
                 with c2:
-                    payment = st.selectbox("Тип оплаты", ["НАЛИЧНЫЕ", "КАРТА"])
+                    payment = st.selectbox(
+                        "Тип оплаты", 
+                        ["НАЛИЧНЫЕ", "КАРТА"],
+                        key="payment_input"
+                    )
 
                 tips_str = st.text_input(
                     "Чаевые, ₽",
                     value="",
                     placeholder="0 (если без чаевых)",
+                    key=tips_key
                 )
 
                 now_moscow = datetime.now(MOSCOW_TZ)
@@ -966,6 +987,11 @@ def show_main_page():
 
                     human_type = "Нал" if typ == "нал" else "Карта"
                     log_action("Добавление заказа", f"{human_type}, сумма {amount:.0f} ₽, чаевые {tips:.0f} ₽")
+                    
+                    # Увеличиваем счётчики для создания новых ключей
+                    st.session_state.amount_counter += 1
+                    st.session_state.tips_counter += 1
+                    
                     st.success(
                         f"✅ Заказ добавлен: {human_type}, {amount:.0f} ₽, чаевые {tips:.0f} ₽"
                     )
@@ -1219,16 +1245,30 @@ def show_main_page():
                 r2.metric("Бензин", f"{fuel_cost:.0f} ₽")
                 r3.metric("Чистая прибыль", f"{profit:.0f} ₽")
                 st.info("📊 Проверьте отчёт в разделе ОТЧЁТЫ для детализации.")
+                
+                # Очищаем кэш после закрытия смены, чтобы отчёты обновились
+                st.cache_data.clear()
 
 def show_reports_page():
     """Отображает страницу отчётов"""
     # Проверяем и создаём таблицы
-    check_and_create_tables()
+    if not check_and_create_tables():
+        st.error("❌ Ошибка при проверке таблиц базы данных")
+        return
     
     st.title(f"📊 ОТЧЁТЫ — {st.session_state['username']}")
     
+    # Кнопка для принудительного обновления данных
+    if st.button("🔄 ОБНОВИТЬ ДАННЫЕ", width='stretch'):
+        st.cache_data.clear()
+        st.rerun()
+    
     # Импортируем функции из pages_imports.py
     try:
+        # Добавляем путь к текущей директории для импорта
+        import sys
+        sys.path.append(os.path.dirname(__file__))
+        
         from pages_imports import (
             get_available_year_months_cached,
             get_month_totals_cached,
@@ -1239,11 +1279,13 @@ def show_reports_page():
             format_month_option
         )
         
+        # Проверяем, есть ли закрытые смены
         year_months = get_available_year_months_cached()
         
         if not year_months:
             st.info("📭 Пока нет закрытых смен с заказами для формирования отчёта.")
             
+            # Показываем пример данных
             with st.expander("📋 Пример формата данных для импорта"):
                 example_data = pd.DataFrame({
                     "Дата": ["01.02.2026", "02.02.2026"],
@@ -1255,6 +1297,7 @@ def show_reports_page():
                 st.caption("Загрузите файл в таком формате через страницу АДМИНКА")
             return
         
+        # Выбор месяца
         ym = st.selectbox(
             "📅 Выберите месяц",
             year_months,
@@ -1262,51 +1305,115 @@ def show_reports_page():
             index=0,
         )
         
+        # Получаем данные за месяц
         df_shifts = get_month_shifts_details_cached(ym)
         totals = get_month_totals_cached(ym)
         
+        # Отчёт по конкретной смене
         st.write("---")
         st.subheader("📄 Отчёт по смене")
         
         if df_shifts.empty:
             st.write("Нет закрытых смен с заказами за выбранный месяц.")
         else:
+            # Выбор даты
             available_dates = df_shifts["Дата"].unique().tolist()
             selected_date_display = st.selectbox("📆 Дата смены", options=available_dates)
             
+            # Конвертируем дату обратно в ISO формат для запроса
             try:
                 selected_date = datetime.strptime(selected_date_display, "%d.%m.%Y").strftime("%Y-%m-%d")
             except:
                 selected_date = selected_date_display
             
+            # Показываем детали смены
             df_shift_summary = df_shifts[df_shifts["Дата"] == selected_date_display].copy()
             if not df_shift_summary.empty:
-                st.dataframe(df_shift_summary, width='stretch')
+                st.dataframe(
+                    df_shift_summary.style.format({
+                        "Нал": "{:.0f}",
+                        "Карта": "{:.0f}",
+                        "Чаевые": "{:.0f}",
+                        "Δ безнал": "{:.0f}",
+                        "Км": "{:.0f}",
+                        "Литры": "{:.1f}",
+                        "Цена": "{:.1f}",
+                        "Всего": "{:.0f}",
+                    }),
+                    width='stretch'
+                )
             
+            # Показываем заказы в смене
             shift_id = get_closed_shift_id_by_date(selected_date)
             df_orders = get_shift_orders_df(shift_id)
             if not df_orders.empty:
-                st.dataframe(df_orders, width='stretch')
+                st.subheader("📋 Заказы в смене")
+                st.dataframe(
+                    df_orders.style.format({
+                        "Сумма": "{:.0f}",
+                        "Чаевые": "{:.0f}",
+                        "Δ безнал": "{:.0f}",
+                        "Вам": "{:.0f}",
+                    }),
+                    width='stretch'
+                )
             
+            # График по часам
             df_hours = get_orders_by_hour(selected_date)
-            st.bar_chart(data=df_hours, x="Час", y="Заказов", width='stretch')
+            if not df_hours.empty:
+                st.subheader("📊 Заказы по часам")
+                st.bar_chart(data=df_hours, x="Час", y="Заказов", width='stretch')
         
+        # Итоги за месяц
         st.write("---")
-        st.subheader("📊 Отчёт за месяц")
+        st.subheader("📊 Итоги за месяц")
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Нал", f"{totals.get('нал', 0):.0f} ₽")
+        col1.metric("Наличные", f"{totals.get('нал', 0):.0f} ₽")
         col2.metric("Карта", f"{totals.get('карта', 0):.0f} ₽")
         col3.metric("Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
         
+        col4, col5, col6 = st.columns(3)
+        col4.metric("Изменение безнала", f"{totals.get('безнал_добавлено', 0):.0f} ₽")
+        col5.metric("Количество смен", f"{totals.get('смен', 0)}")
+        
+        total_income = totals.get('всего', 0)
+        col6.metric("Всего доход", f"{total_income:.0f} ₽")
+        
+        # Расходы на бензин
+        if not df_shifts.empty:
+            fuel_cost = float(
+                (df_shifts["Литры"].fillna(0) * df_shifts["Цена"].fillna(0)).sum()
+            )
+            profit = total_income - fuel_cost
+            
+            st.write("---")
+            st.subheader("💰 Финансовый результат")
+            
+            col7, col8, col9 = st.columns(3)
+            col7.metric("Доход", f"{total_income:.0f} ₽")
+            col8.metric("Бензин", f"{fuel_cost:.0f} ₽")
+            col9.metric("Прибыль", f"{profit:.0f} ₽")
+        
     except ImportError as e:
-        st.error(f"Ошибка загрузки модуля отчётов: {e}")
+        st.error(f"❌ Ошибка загрузки модуля отчётов: {e}")
         st.info("Убедитесь, что файл pages_imports.py существует в корневой папке")
+        
+        # Показываем отладочную информацию
+        with st.expander("🔧 Отладка"):
+            st.write("Текущая директория:", os.getcwd())
+            st.write("Файлы в директории:", os.listdir("."))
+            
+    except Exception as e:
+        st.error(f"❌ Ошибка при формировании отчёта: {e}")
+        st.exception(e)
 
 def show_admin_page():
     """Отображает страницу администрирования"""
     # Проверяем и создаём таблицы
-    check_and_create_tables()
+    if not check_and_create_tables():
+        st.error("❌ Ошибка при проверке таблиц базы данных")
+        return
     
     st.title(f"🛠 АДМИНИСТРИРОВАНИЕ — {st.session_state['username']}")
     
@@ -1346,6 +1453,10 @@ def show_admin_page():
             if st.button("🚀 ИМПОРТИРОВАТЬ", width='stretch'):
                 with st.spinner("Импортируем..."):
                     try:
+                        # Добавляем путь к текущей директории для импорта
+                        import sys
+                        sys.path.append(os.path.dirname(__file__))
+                        
                         from pages_imports import import_from_gsheet
                         imported = import_from_gsheet(sheet_url)
                         if imported > 0:
@@ -1358,6 +1469,10 @@ def show_admin_page():
             if uploaded_file and st.button("📤 ИМПОРТИРОВАТЬ", width='stretch'):
                 with st.spinner("Импортируем..."):
                     try:
+                        # Добавляем путь к текущей директории для импорта
+                        import sys
+                        sys.path.append(os.path.dirname(__file__))
+                        
                         from pages_imports import import_from_excel
                         imported = import_from_excel(uploaded_file)
                         if imported > 0:
@@ -1368,6 +1483,10 @@ def show_admin_page():
     with tab2:
         st.header("🔄 ПЕРЕСЧЁТ ДАННЫХ")
         try:
+            # Добавляем путь к текущей директории для импорта
+            import sys
+            sys.path.append(os.path.dirname(__file__))
+            
             from pages_imports import get_accumulated_beznal, recalc_full_db
             current = get_accumulated_beznal()
             st.metric("Текущий безнал", f"{current:.0f} ₽")
@@ -1554,6 +1673,10 @@ def show_admin_page():
     with tab6:
         st.header("🔧 ИНСТРУМЕНТЫ")
         try:
+            # Добавляем путь к текущей директории для импорта
+            import sys
+            sys.path.append(os.path.dirname(__file__))
+            
             from pages_imports import normalize_shift_dates, reset_db
             if st.button("🛠 ИСПРАВИТЬ ФОРМАТ ДАТ", width='stretch'):
                 fixed, skipped = normalize_shift_dates()
