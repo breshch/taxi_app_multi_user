@@ -201,6 +201,18 @@ def apply_custom_css():
             padding: 0.5rem;
             border-top: 1px solid #e2e8f0;
         }
+        /* Стили для кнопок добавления расходов */
+        .add-expense-btn {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .expense-item {
+            background-color: #f8fafc;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-left: 3px solid #ef4444;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -284,13 +296,26 @@ def get_backup_dir() -> str:
         os.makedirs(backup_dir)
     return backup_dir
 
+def add_column_if_not_exists(cursor, table_name, column_name, column_type):
+    """Добавляет колонку в таблицу, если она не существует"""
+    try:
+        cursor.execute(f"SELECT {column_name} FROM {table_name} LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+            print(f"Добавлена колонка {column_name} в таблицу {table_name}")
+            return True
+        except Exception as e:
+            print(f"Ошибка при добавлении колонки {column_name}: {e}")
+    return False
+
 def check_and_create_tables():
     """Проверяет и создаёт все необходимые таблицы в базе данных"""
     try:
         conn = sqlite3.connect(get_current_db_name())
         cursor = conn.cursor()
         
-        # Создаём таблицу shifts
+        # Создаём таблицу shifts если её нет
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS shifts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -301,6 +326,18 @@ def check_and_create_tables():
                 is_open INTEGER DEFAULT 1,
                 opened_at TEXT,
                 closed_at TEXT
+            )
+        """)
+        
+        # Создаём таблицу для дополнительных расходов
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS extra_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shift_id INTEGER,
+                amount REAL DEFAULT 0,
+                description TEXT,
+                created_at TEXT,
+                FOREIGN KEY (shift_id) REFERENCES shifts (id)
             )
         """)
         
@@ -320,10 +357,7 @@ def check_and_create_tables():
         """)
         
         # Добавляем колонку order_time, если её нет
-        try:
-            cursor.execute("ALTER TABLE orders ADD COLUMN order_time TEXT")
-        except sqlite3.OperationalError:
-            pass
+        add_column_if_not_exists(cursor, "orders", "order_time", "TEXT")
         
         # Создаём таблицу accumulated_beznal
         cursor.execute("""
@@ -376,15 +410,8 @@ def init_auth_db():
     )
     
     # Проверяем и добавляем недостающие колонки
-    try:
-        cur.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
-    except sqlite3.OperationalError:
-        pass  # Колонка уже существует
-    
-    try:
-        cur.execute("ALTER TABLE users ADD COLUMN total_logins INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # Колонка уже существует
+    add_column_if_not_exists(cur, "users", "last_login", "TEXT")
+    add_column_if_not_exists(cur, "users", "total_logins", "INTEGER DEFAULT 0")
     
     conn.commit()
     conn.close()
@@ -506,7 +533,10 @@ def get_all_users() -> list:
 
 # ===== ФУНКЦИИ БД ДЛЯ СМЕН И ЗАКАЗОВ =====
 def get_db_connection():
-    return sqlite3.connect(get_current_db_name())
+    conn = sqlite3.connect(get_current_db_name())
+    # Проверяем и создаём таблицы при каждом подключении
+    check_and_create_tables()
+    return conn
 
 def init_user_db(db_path: str = None):
     """Инициализирует базу данных пользователя."""
@@ -537,6 +567,19 @@ def init_user_db(db_path: str = None):
             is_open INTEGER DEFAULT 1,
             opened_at TEXT,
             closed_at TEXT
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS extra_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shift_id INTEGER,
+            amount REAL DEFAULT 0,
+            description TEXT,
+            created_at TEXT,
+            FOREIGN KEY (shift_id) REFERENCES shifts (id)
         )
         """
     )
@@ -621,6 +664,67 @@ def close_shift_db(shift_id: int, km: int, liters: float, fuel_price: float):
     )
     conn.commit()
     conn.close()
+
+def add_extra_expense(shift_id: int, amount: float, description: str):
+    """Добавляет дополнительный расход для смены"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        """
+        INSERT INTO extra_expenses (shift_id, amount, description, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (shift_id, amount, description, now),
+    )
+    conn.commit()
+    conn.close()
+
+def get_extra_expenses(shift_id: int) -> list:
+    """Получает все дополнительные расходы для смены"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, amount, description, created_at
+        FROM extra_expenses
+        WHERE shift_id = ?
+        ORDER BY id
+        """,
+        (shift_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    expenses = []
+    for row in rows:
+        expenses.append({
+            'id': row[0],
+            'amount': row[1] or 0.0,
+            'description': row[2] or '',
+            'created_at': row[3] or ''
+        })
+    return expenses
+
+def delete_extra_expense(expense_id: int):
+    """Удаляет дополнительный расход"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM extra_expenses WHERE id = ?", (expense_id,))
+    conn.commit()
+    conn.close()
+
+def get_total_extra_expenses(shift_id: int) -> float:
+    """Получает общую сумму дополнительных расходов для смены"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT SUM(amount) FROM extra_expenses WHERE shift_id = ?",
+        (shift_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] or 0.0
 
 def add_order_db(
     shift_id,
@@ -1099,20 +1203,21 @@ def show_main_page():
 
                 st.divider()
 
+            # ИТОГИ ПО СМЕНЕ
             st.subheader("💼 ИТОГИ ПО СМЕНЕ")
-            top = st.container()
-            bottom = st.container()
-            with top:
-                c1, c2 = st.columns(2)
-                c1.metric("Нал", f"{nal:.0f} ₽")
-                c2.metric("Карта", f"{card:.0f} ₽")
-            with bottom:
-                c3, c4 = st.columns(2)
-                c3.metric("Чаевые", f"{tips_sum:.0f} ₽")
-                c4.metric("Изм. безнала", f"{beznal_this:.0f} ₽")
+            
+            # Получаем дополнительные расходы
+            extra_expenses = get_extra_expenses(shift_id)
+            total_extra = sum(e['amount'] for e in extra_expenses)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Наличные", f"{nal:.0f} ₽")
+            col2.metric("Карта", f"{card:.0f} ₽")
+            col3.metric("Чаевые", f"{tips_sum:.0f} ₽")
+            col4.metric("Изм. безнала", f"{beznal_this:.0f} ₽")
 
-            total_day = nal + card + tips_sum
-            st.caption(f"Всего за смену (до бензина): {total_day:.0f} ₽")
+            total_income = nal + card + tips_sum
+            st.markdown(f'<div class="stats-box" style="margin-top:1rem"><span class="stat-label">ДОХОД ЗА СМЕНУ</span> <span class="stat-value">{total_income:.0f} ₽</span></div>', unsafe_allow_html=True)
 
         # ===== ФОРМА РЕДАКТИРОВАНИЯ ВЫБРАННОГО ЗАКАЗА =====
         if st.session_state.edit_order_id is not None:
@@ -1215,20 +1320,68 @@ def show_main_page():
                 st.session_state.edit_order_id = None
                 st.rerun()
 
+        # ===== УПРАВЛЕНИЕ ДОПОЛНИТЕЛЬНЫМИ РАСХОДАМИ =====
+        st.write("---")
+        with st.expander("💸 ДОПОЛНИТЕЛЬНЫЕ РАСХОДЫ", expanded=False):
+            st.caption("Добавьте несколько расходов: мойка, омывайка, еда, и т.д.")
+            
+            # Форма для добавления нового расхода
+            with st.form("add_expense_form"):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    expense_desc = st.text_input("Описание расхода", placeholder="например: мойка", key="expense_desc")
+                with col2:
+                    expense_amount = st.number_input("Сумма, ₽", min_value=0.0, step=50.0, format="%.0f", key="expense_amount")
+                with col3:
+                    submitted_expense = st.form_submit_button("➕ ДОБАВИТЬ", use_container_width=True)
+            
+            if submitted_expense and expense_desc and expense_amount > 0:
+                add_extra_expense(shift_id, expense_amount, expense_desc)
+                log_action("Добавление расхода", f"{expense_desc}: {expense_amount:.0f} ₽")
+                st.success(f"✅ Расход добавлен: {expense_desc} - {expense_amount:.0f} ₽")
+                st.rerun()
+            
+            # Список добавленных расходов
+            extra_expenses = get_extra_expenses(shift_id)
+            if extra_expenses:
+                st.subheader("📋 ДОБАВЛЕННЫЕ РАСХОДЫ")
+                total_extra = 0
+                for exp in extra_expenses:
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.markdown(f"**{exp['description']}**")
+                    with col2:
+                        st.markdown(f"{exp['amount']:.0f} ₽")
+                    with col3:
+                        if st.button("🗑", key=f"del_exp_{exp['id']}", help="Удалить расход"):
+                            delete_extra_expense(exp['id'])
+                            log_action("Удаление расхода", f"{exp['description']}")
+                            st.rerun()
+                    total_extra += exp['amount']
+                    st.divider()
+                
+                st.markdown(f"**ИТОГО РАСХОДОВ: {total_extra:.0f} ₽**")
+            else:
+                st.info("Пока нет добавленных расходов")
+
         # ===== ЗАКРЫТИЕ СМЕНЫ =====
         st.write("---")
         with st.expander("🔒 ЗАКРЫТЬ СМЕНУ"):
             last_consumption, last_price = get_last_fuel_params()
+            
+            # Получаем общую сумму доп расходов
+            total_extra = get_total_extra_expenses(shift_id)
 
             with st.form("close_form"):
+                st.subheader("⛽ ТОПЛИВО")
                 km = st.number_input(
-                    "Километраж за смену (км)", min_value=0, step=10
+                    "Километраж за смену (км)", min_value=0, step=10, value=100
                 )
 
                 col1, col2 = st.columns(2)
                 with col1:
                     consumption = st.number_input(
-                        "Расход, л на 100 км",
+                        "Расход, л/100км",
                         min_value=0.0,
                         step=0.5,
                         value=float(f"{last_consumption:.1f}"),
@@ -1243,17 +1396,48 @@ def show_main_page():
                         format="%.1f",
                     )
 
+                st.divider()
+                
+                # Расчёт итогов
                 if km > 0 and consumption > 0 and fuel_price > 0:
                     liters = (km / 100) * consumption
                     fuel_cost = liters * fuel_price
-                    st.write(
-                        f"Расход: {liters:.1f} л, бензин: {fuel_cost:.2f} ₽"
-                    )
+                    
+                    income = nal + card + tips_sum
+                    total_costs = fuel_cost + total_extra
+                    profit = income - total_costs
+                    
+                    st.markdown(f"""
+                    <div class="stats-box">
+                        <span class="stat-label">РАСХОДЫ:</span><br>
+                        ⛽ Бензин: {fuel_cost:.0f} ₽<br>
+                        💸 Доп. расходы ({len(extra_expenses)} шт): {total_extra:.0f} ₽<br>
+                        <span class="stat-label">ИТОГО РАСХОДОВ: {total_costs:.0f} ₽</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown(f"""
+                    <div class="stats-box">
+                        <span class="stat-label">ДОХОД ЗА СМЕНУ:</span> {income:.0f} ₽<br>
+                        <span class="stat-label">ЧИСТАЯ ПРИБЫЛЬ:</span> {profit:.0f} ₽
+                    </div>
+                    """, unsafe_allow_html=True)
                 else:
                     liters = 0.0
                     fuel_cost = 0.0
+                    total_costs = total_extra
+                    income = nal + card + tips_sum
+                    profit = income - total_costs
+                    
+                    st.markdown(f"""
+                    <div class="stats-box">
+                        <span class="stat-label">ДОП. РАСХОДЫ ({len(extra_expenses)} шт):</span> {total_extra:.0f} ₽<br>
+                        <span class="stat-label">ДОХОД ЗА СМЕНУ:</span> {income:.0f} ₽<br>
+                        <span class="stat-label">ПРИБЫЛЬ:</span> {profit:.0f} ₽
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                submitted_close = st.form_submit_button("🔒 ЗАКРЫТЬ СМЕНУ", width='stretch')
+                submitted_close = st.form_submit_button("🔒 ЗАКРЫТЬ СМЕНУ", width='stretch', type="primary")
 
             if submitted_close:
                 if km > 0 and consumption > 0 and fuel_price > 0:
@@ -1266,14 +1450,19 @@ def show_main_page():
                 close_shift_db(shift_id, km, liters, fuel_price)
 
                 income = nal + card + tips_sum
-                profit = income - fuel_cost
+                total_costs = fuel_cost + total_extra
+                profit = income - total_costs
 
-                log_action("Закрытие смены", f"Дата: {date_str}, доход: {income:.0f} ₽, прибыль: {profit:.0f} ₽")
-                st.success("✅ Смена закрыта.")
-                r1, r2, r3 = st.columns(3)
-                r1.metric("Доход", f"{income:.0f} ₽")
-                r2.metric("Бензин", f"{fuel_cost:.0f} ₽")
-                r3.metric("Чистая прибыль", f"{profit:.0f} ₽")
+                log_action("Закрытие смены", 
+                          f"Дата: {date_str}, доход: {income:.0f} ₽, расходы: {total_costs:.0f} ₽, прибыль: {profit:.0f} ₽")
+                
+                st.success("✅ Смена закрыта")
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Доход", f"{income:.0f} ₽")
+                col2.metric("Расходы", f"{total_costs:.0f} ₽")
+                col3.metric("Прибыль", f"{profit:.0f} ₽")
+                
                 st.info("📊 Проверьте отчёт в разделе ОТЧЁТЫ для детализации.")
                 
                 # Очищаем кэш после закрытия смены, чтобы отчёты обновились
@@ -1383,6 +1572,16 @@ def show_reports_page():
                     width='stretch'
                 )
             
+            # Получаем доп расходы для этой смены
+            extra_expenses = get_extra_expenses(shift_id)
+            if extra_expenses:
+                st.subheader("💸 Дополнительные расходы")
+                exp_df = pd.DataFrame(extra_expenses)
+                st.dataframe(
+                    exp_df[['description', 'amount']].rename(columns={'description': 'Описание', 'amount': 'Сумма'}).style.format({"Сумма": "{:.0f} ₽"}),
+                    width='stretch'
+                )
+            
             # График по часам
             df_hours = get_orders_by_hour(selected_date)
             if not df_hours.empty:
@@ -1405,7 +1604,7 @@ def show_reports_page():
         total_income = totals.get('всего', 0)
         col6.metric("Всего доход", f"{total_income:.0f} ₽")
         
-        # Расходы на бензин
+        # Расходы на бензин и доп расходы
         if not df_shifts.empty:
             fuel_cost = float(
                 (df_shifts["Литры"].fillna(0) * df_shifts["Цена"].fillna(0)).sum()
