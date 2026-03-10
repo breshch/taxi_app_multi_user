@@ -155,28 +155,6 @@ def apply_mobile_optimized_css():
             text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
         }
         
-        /* Альтернативный вариант с эмодзи */
-        .user-info-simple {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            background: #f0f2f6;
-            padding: 20px 15px;
-            border-radius: 20px;
-            margin-bottom: 20px;
-            border: 2px solid #667eea;
-        }
-        
-        .user-emoji {
-            font-size: 4rem !important;
-        }
-        
-        .user-name-large {
-            font-size: 2.5rem !important;
-            font-weight: bold;
-            color: #1e293b;
-        }
-        
         /* Компактные заголовки для мобильных */
         h1 {
             font-size: 1.4rem !important;
@@ -1763,14 +1741,23 @@ def show_reports_page():
         totals = get_month_totals_cached(ym)
         month_extra = get_month_extra_expenses(ym)
         
+        # Рассчитываем расходы на бензин за месяц
+        month_fuel_cost = 0.0
+        month_fuel_liters = 0.0
+        if not df_shifts.empty:
+            month_fuel_cost = float(
+                (df_shifts["Литры"].fillna(0) * df_shifts["Цена"].fillna(0)).sum()
+            )
+            month_fuel_liters = float(df_shifts["Литры"].fillna(0).sum())
+        
         st.write("---")
-        st.subheader("📄 СМЕНА")
+        st.subheader("📄 ДЕТАЛИ ПО СМЕНЕ")
         
         if df_shifts.empty:
-            st.write("Нет данных")
+            st.write("Нет данных за выбранный месяц")
         else:
             dates = df_shifts["Дата"].unique().tolist()
-            selected = st.selectbox("📆 Дата", options=dates)
+            selected = st.selectbox("📆 Выберите дату смены", options=dates)
             
             try:
                 selected_date = datetime.strptime(selected, "%d.%m.%Y").strftime("%Y-%m-%d")
@@ -1779,60 +1766,332 @@ def show_reports_page():
             
             df_summary = df_shifts[df_shifts["Дата"] == selected].copy()
             if not df_summary.empty:
-                st.dataframe(df_summary, width='stretch')
-            
-            shift_id = get_closed_shift_id_by_date(selected_date)
-            df_orders = get_shift_orders_df(shift_id)
-            if not df_orders.empty:
-                st.subheader("📋 Заказы")
-                st.dataframe(df_orders, width='stretch')
-            
-            extra_expenses = get_extra_expenses(shift_id)
-            if extra_expenses:
-                st.subheader("💸 Расходы")
-                exp_df = pd.DataFrame(extra_expenses)
                 st.dataframe(
-                    exp_df[['description', 'amount']].rename(
-                        columns={'description': 'Описание', 'amount': 'Сумма'}
-                    ).style.format({"Сумма": "{:.0f} ₽"}),
+                    df_summary.style.format({
+                        "Нал": "{:.0f} ₽",
+                        "Карта": "{:.0f} ₽",
+                        "Чаевые": "{:.0f} ₽",
+                        "Δ безнал": "{:.0f} ₽",
+                        "Км": "{:.0f} км",
+                        "Литры": "{:.1f} л",
+                        "Цена": "{:.1f} ₽/л",
+                        "Всего": "{:.0f} ₽",
+                    }),
                     width='stretch'
                 )
-                st.metric("💰 Всего расходов", f"{sum(e['amount'] for e in extra_expenses):.0f} ₽")
+                
+                # Расчёт расходов для выбранной смены
+                row = df_summary.iloc[0]
+                fuel_cost = float(row["Литры"] * row["Цена"])
+                shift_id = get_closed_shift_id_by_date(selected_date)
+                extra = get_extra_expenses(shift_id) if shift_id else []
+                extra_sum = sum(e['amount'] for e in extra)
+                income = float(row["Всего"])
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("💰 Доход", f"{income:.0f} ₽")
+                col2.metric("⛽ Бензин", f"{fuel_cost:.0f} ₽")
+                col3.metric("💸 Прочие расходы", f"{extra_sum:.0f} ₽")
+                
+                total_costs = fuel_cost + extra_sum
+                profit = income - total_costs
+                
+                st.metric("📈 Чистая прибыль", f"{profit:.0f} ₽", 
+                         delta=f"{profit/income*100:.1f}%" if income > 0 else None)
+            
+            shift_id = get_closed_shift_id_by_date(selected_date)
+            if shift_id:
+                df_orders = get_shift_orders_df(shift_id)
+                if not df_orders.empty:
+                    st.subheader("📋 ЗАКАЗЫ В СМЕНЕ")
+                    st.dataframe(
+                        df_orders.style.format({
+                            "Сумма": "{:.0f} ₽",
+                            "Чаевые": "{:.0f} ₽",
+                            "Δ безнал": "{:.0f} ₽",
+                            "Вам": "{:.0f} ₽",
+                        }),
+                        width='stretch'
+                    )
+                
+                extra_expenses = get_extra_expenses(shift_id)
+                if extra_expenses:
+                    st.subheader("💸 ДОПОЛНИТЕЛЬНЫЕ РАСХОДЫ")
+                    exp_df = pd.DataFrame(extra_expenses)
+                    st.dataframe(
+                        exp_df[['description', 'amount']].rename(
+                            columns={'description': 'Описание', 'amount': 'Сумма'}
+                        ).style.format({"Сумма": "{:.0f} ₽"}),
+                        width='stretch'
+                    )
+                    st.caption(f"💰 Всего доп. расходов: {sum(e['amount'] for e in extra_expenses):.0f} ₽")
             
             df_hours = get_orders_by_hour(selected_date)
             if not df_hours.empty:
+                st.subheader("📊 ЗАКАЗЫ ПО ЧАСАМ")
                 st.bar_chart(data=df_hours, x="Час", y="Заказов")
         
         st.write("---")
         st.subheader("📊 ИТОГИ ЗА МЕСЯЦ")
         
-        cols = st.columns(3)
-        cols[0].metric("Нал", f"{totals.get('нал', 0):.0f}₽")
-        cols[1].metric("Карта", f"{totals.get('карта', 0):.0f}₽")
-        cols[2].metric("Чаевые", f"{totals.get('чаевые', 0):.0f}₽")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("💵 Наличные", f"{totals.get('нал', 0):.0f} ₽")
+        col2.metric("💳 Карта", f"{totals.get('карта', 0):.0f} ₽")
+        col3.metric("💝 Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
         
         total_income = totals.get('всего', 0)
-        cols2 = st.columns(3)
-        cols2[0].metric("Всего доход", f"{total_income:.0f}₽")
-        cols2[1].metric("Расходы", f"{month_extra:.0f}₽")
-        cols2[2].metric("Чистые", f"{total_income - month_extra:.0f}₽")
         
-        # Статистика по расходам
-        expense_stats = get_all_extra_expenses_stats()
-        if expense_stats:
+        col4, col5, col6 = st.columns(3)
+        col4.metric("📊 Изменение безнала", f"{totals.get('безнал_добавлено', 0):.0f} ₽")
+        col5.metric("📆 Количество смен", f"{totals.get('смен', 0)}")
+        col6.metric("💰 ВСЕГО ДОХОД", f"{total_income:.0f} ₽")
+        
+        st.write("---")
+        st.subheader("💰 ФИНАНСОВЫЙ РЕЗУЛЬТАТ ЗА МЕСЯЦ")
+        
+        # Расходы
+        col7, col8, col9 = st.columns(3)
+        col7.metric("⛽ Расходы на бензин", f"{month_fuel_cost:.0f} ₽")
+        col8.metric("💸 Прочие расходы", f"{month_extra:.0f} ₽")
+        
+        total_costs = month_fuel_cost + month_extra
+        col9.metric("📉 ВСЕГО РАСХОДОВ", f"{total_costs:.0f} ₽")
+        
+        # Прибыль
+        profit = total_income - total_costs
+        profitability = (profit / total_income * 100) if total_income > 0 else 0
+        
+        col10, col11, col12 = st.columns(3)
+        col10.metric("📈 ЧИСТАЯ ПРИБЫЛЬ", f"{profit:.0f} ₽", 
+                    delta=f"{profitability:.1f}%" if total_income > 0 else None)
+        
+        shifts_count = totals.get('смен', 0)
+        col11.metric("💰 Средний доход за смену", 
+                    f"{total_income / shifts_count:.0f} ₽" if shifts_count > 0 else "0 ₽")
+        col12.metric("📊 Средняя прибыль за смену", 
+                    f"{profit / shifts_count:.0f} ₽" if shifts_count > 0 else "0 ₽")
+        
+        # Детализация расходов
+        if not df_shifts.empty:
             st.write("---")
-            st.subheader("📊 СТАТИСТИКА РАСХОДОВ")
+            st.subheader("📋 ДЕТАЛИЗАЦИЯ РАСХОДОВ ПО СМЕНАМ")
             
-            for stat in expense_stats[:10]:  # Топ-10 расходов
+            # Создаём таблицу с детализацией
+            details = []
+            for _, row in df_shifts.iterrows():
+                shift_date = row["Дата"]
+                try:
+                    shift_id = get_closed_shift_id_by_date(
+                        datetime.strptime(shift_date, "%d.%m.%Y").strftime("%Y-%m-%d")
+                    )
+                except:
+                    shift_id = None
+                
+                fuel = row["Литры"] * row["Цена"]
+                fuel_liters = row["Литры"]
+                fuel_price = row["Цена"]
+                extra = sum(e['amount'] for e in get_extra_expenses(shift_id)) if shift_id else 0
+                income = row["Всего"]
+                profit_shift = income - fuel - extra
+                
+                details.append({
+                    "Дата": shift_date,
+                    "Доход": income,
+                    "Бензин (л)": fuel_liters,
+                    "Цена бензина": fuel_price,
+                    "Бензин (₽)": fuel,
+                    "Доп.расходы": extra,
+                    "Всего расходов": fuel + extra,
+                    "Прибыль": profit_shift,
+                    "Рентабельность": f"{profit_shift/income*100:.1f}%" if income > 0 else "0%"
+                })
+            
+            df_details = pd.DataFrame(details)
+            st.dataframe(
+                df_details.style.format({
+                    "Доход": "{:.0f} ₽",
+                    "Бензин (л)": "{:.1f} л",
+                    "Цена бензина": "{:.1f} ₽/л",
+                    "Бензин (₽)": "{:.0f} ₽",
+                    "Доп.расходы": "{:.0f} ₽",
+                    "Всего расходов": "{:.0f} ₽",
+                    "Прибыль": "{:.0f} ₽",
+                }),
+                width='stretch'
+            )
+            
+            # График доходов и расходов
+            st.subheader("📊 ДИНАМИКА ДОХОДОВ И РАСХОДОВ")
+            
+            chart_data = pd.DataFrame({
+                "Дата": [d["Дата"] for d in details],
+                "Доход": [d["Доход"] for d in details],
+                "Расходы (бензин)": [d["Бензин (₽)"] for d in details],
+                "Расходы (прочие)": [d["Доп.расходы"] for d in details],
+                "Прибыль": [d["Прибыль"] for d in details]
+            })
+            
+            if not chart_data.empty:
+                st.line_chart(data=chart_data.set_index("Дата")[["Доход", "Расходы (бензин)", "Расходы (прочие)", "Прибыль"]])
+        
+        st.write("---")
+        st.subheader("📊 ПОЛНАЯ СТАТИСТИКА РАСХОДОВ")
+        
+        # Собираем статистику по всем расходам (включая бензин)
+        all_expenses = []
+        
+        # Добавляем бензин как статью расходов
+        all_expenses.append({
+            'description': '⛽ Бензин',
+            'total': month_fuel_cost,
+            'count': len(df_shifts) if not df_shifts.empty else 0,
+            'avg': month_fuel_cost / len(df_shifts) if len(df_shifts) > 0 else 0
+        })
+        
+        # Добавляем прочие расходы как отдельную статью
+        all_expenses.append({
+            'description': '💸 Прочие расходы',
+            'total': month_extra,
+            'count': len(df_shifts) if not df_shifts.empty else 0,
+            'avg': month_extra / len(df_shifts) if len(df_shifts) > 0 else 0
+        })
+        
+        # Добавляем все доп. расходы по категориям
+        expense_stats = get_all_extra_expenses_stats()
+        for stat in expense_stats:
+            all_expenses.append({
+                'description': stat['description'],
+                'total': stat['total'],
+                'count': stat['count'],
+                'avg': stat['total'] / stat['count'] if stat['count'] > 0 else 0
+            })
+        
+        # Сортируем по сумме (от больших к меньшим)
+        all_expenses.sort(key=lambda x: x['total'], reverse=True)
+        
+        # Показываем топ-15 расходов
+        st.subheader("🏆 ТОП-15 РАСХОДОВ")
+        
+        for i, exp in enumerate(all_expenses[:15], 1):
+            if exp['total'] > 0:
+                # Выбираем цвет в зависимости от типа расхода
+                if '⛽' in exp['description']:
+                    bg_color = "#dbeafe"  # синий для бензина
+                elif '💸' in exp['description']:
+                    bg_color = "#fef9c3"  # желтый для прочих
+                else:
+                    bg_color = "#fee2e2"  # красный для остальных
+                
                 st.markdown(f"""
-                <div class="expense-stat">
-                    <strong>{stat['description']}</strong><br>
-                    Всего: {stat['total']:.0f} ₽ | {stat['count']} раз(а)
+                <div style="background-color: {bg_color}; padding: 10px; border-radius: 8px; margin: 5px 0; border-left: 4px solid #3b82f6;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="font-weight: bold;">{i}. {exp['description']}</span>
+                        <span style="font-weight: bold; color: #1e293b;">{exp['total']:.0f} ₽</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; color: #64748b; font-size: 0.9rem;">
+                        <span>📊 {exp['count']} раз(а)</span>
+                        <span>💰 Средний чек: {exp['avg']:.0f} ₽</span>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
         
+        # Круговая диаграмма структуры расходов
+        if total_costs > 0:
+            st.subheader("🥧 СТРУКТУРА РАСХОДОВ")
+            
+            # Данные для круговой диаграммы
+            pie_data = pd.DataFrame({
+                'Категория': ['Бензин', 'Прочие расходы'],
+                'Сумма': [month_fuel_cost, month_extra]
+            })
+            
+            # Добавляем топ-3 доп. расходов
+            for exp in expense_stats[:3]:
+                if exp['total'] > 0:
+                    pie_data = pd.concat([pie_data, pd.DataFrame({
+                        'Категория': [exp['description']],
+                        'Сумма': [exp['total']]
+                    })], ignore_index=True)
+            
+            st.bar_chart(data=pie_data.set_index('Категория'))
+            
+            # Процентное соотношение
+            st.caption(f"""
+            **Анализ расходов:**
+            - Бензин: {month_fuel_cost/total_costs*100:.1f}% от всех расходов
+            - Прочие расходы: {month_extra/total_costs*100:.1f}% от всех расходов
+            - Средний расход на бензин за смену: {month_fuel_cost/shifts_count:.0f} ₽ ({month_fuel_liters/shifts_count:.1f} л)
+            """ if shifts_count > 0 else "")
+        
+        # График расхода бензина по дням
+        if not df_shifts.empty:
+            st.subheader("📈 РАСХОД БЕНЗИНА ПО ДНЯМ")
+            
+            fuel_chart = pd.DataFrame({
+                "Дата": [d["Дата"] for d in details],
+                "Литры": [d["Бензин (л)"] for d in details],
+                "Сумма (₽)": [d["Бензин (₽)"] for d in details]
+            })
+            
+            if not fuel_chart.empty:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.bar_chart(data=fuel_chart.set_index("Дата")[["Литры"]])
+                with col2:
+                    st.bar_chart(data=fuel_chart.set_index("Дата")[["Сумма (₽)"]])
+        
+        # Сравнение с прошлым месяцем (если есть данные)
+        st.write("---")
+        st.subheader("📉 СРАВНЕНИЕ С ПРЕДЫДУЩИМ МЕСЯЦЕМ")
+        
+        # Получаем предыдущий месяц
+        year, month = map(int, ym.split('-'))
+        if month == 1:
+            prev_ym = f"{year-1}-12"
+        else:
+            prev_ym = f"{year}-{month-1:02d}"
+        
+        # Пытаемся получить данные за предыдущий месяц
+        prev_df_shifts = get_month_shifts_details_cached(prev_ym)
+        
+        if not prev_df_shifts.empty:
+            prev_month_extra = get_month_extra_expenses(prev_ym)
+            prev_month_fuel = float(
+                (prev_df_shifts["Литры"].fillna(0) * prev_df_shifts["Цена"].fillna(0)).sum()
+            ) if not prev_df_shifts.empty else 0
+            prev_total_income = get_month_totals_cached(prev_ym).get('всего', 0)
+            
+            # Рассчитываем изменения
+            income_change = total_income - prev_total_income
+            fuel_change = month_fuel_cost - prev_month_fuel
+            extra_change = month_extra - prev_month_extra
+            total_costs_change = total_costs - (prev_month_fuel + prev_month_extra)
+            profit_change = profit - (prev_total_income - prev_month_fuel - prev_month_extra)
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("💰 Доход", f"{total_income:.0f} ₽", 
+                       delta=f"{income_change:+.0f} ₽" if income_change != 0 else None)
+            col2.metric("⛽ Бензин", f"{month_fuel_cost:.0f} ₽", 
+                       delta=f"{fuel_change:+.0f} ₽" if fuel_change != 0 else None)
+            col3.metric("💸 Прочие", f"{month_extra:.0f} ₽", 
+                       delta=f"{extra_change:+.0f} ₽" if extra_change != 0 else None)
+            
+            col4, col5, col6 = st.columns(3)
+            col4.metric("📉 Расходы", f"{total_costs:.0f} ₽", 
+                       delta=f"{total_costs_change:+.0f} ₽" if total_costs_change != 0 else None)
+            col5.metric("📈 Прибыль", f"{profit:.0f} ₽", 
+                       delta=f"{profit_change:+.0f} ₽" if profit_change != 0 else None)
+            
+            if prev_total_income > 0:
+                profitability_change = (profit/total_income*100) - ((prev_total_income - prev_month_fuel - prev_month_extra)/prev_total_income*100)
+                col6.metric("📊 Рентабельность", f"{profit/total_income*100:.1f}%" if total_income > 0 else "0%",
+                           delta=f"{profitability_change:+.1f}%" if profitability_change != 0 else None)
+        else:
+            st.info("📭 Нет данных за предыдущий месяц для сравнения")
+        
     except Exception as e:
         st.error(f"Ошибка: {e}")
+        st.exception(e)
 
 def show_admin_page():
     """Отображает страницу администрирования"""
@@ -1840,7 +2099,7 @@ def show_admin_page():
         st.error("❌ Ошибка БД")
         return
     
-    st.title(f"🛠 АДМИНКА")
+    st.title(f"🛠 АДМИНИСТРИРОВАНИЕ")
     
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "changeme")
     
@@ -1849,7 +2108,7 @@ def show_admin_page():
     
     if not st.session_state.admin_authenticated:
         with st.form("admin_login"):
-            pwd = st.text_input("Пароль", type="password")
+            pwd = st.text_input("Пароль администратора", type="password")
             ok = st.form_submit_button("ВОЙТИ", width='stretch')
             
             if ok and pwd == ADMIN_PASSWORD:
@@ -1859,6 +2118,7 @@ def show_admin_page():
                 st.error("❌ Неверный пароль")
         return
     
+    # Создаём вкладки
     tabs = st.tabs([
         "📥 ИМПОРТ", 
         "🔄 ПЕРЕСЧЁТ", 
@@ -1869,71 +2129,76 @@ def show_admin_page():
     ])
     
     with tabs[0]:
-        st.subheader("📥 ИМПОРТ")
+        st.subheader("📥 ИМПОРТ ДАННЫХ")
         
-        with st.expander("📄 Google Sheets"):
-            sheet_url = st.text_input("Ссылка")
-            if st.button("🚀 ИМПОРТ", width='stretch'):
-                with st.spinner("..."):
+        with st.expander("📄 Импорт из Google Sheets", expanded=False):
+            st.caption("Вставьте ссылку на Google Sheets таблицу. Таблица должна быть в формате: Дата, Тип, Сумма, Чаевые")
+            sheet_url = st.text_input("Ссылка на таблицу", placeholder="https://docs.google.com/spreadsheets/d/...")
+            if st.button("🚀 ИМПОРТИРОВАТЬ", width='stretch'):
+                with st.spinner("Импортируем данные..."):
                     try:
                         import sys
                         sys.path.append(os.path.dirname(__file__))
                         from pages_imports import import_from_gsheet
                         imported = import_from_gsheet(sheet_url)
                         if imported > 0:
-                            st.success(f"✅ {imported} заказов")
+                            st.success(f"✅ Импортировано {imported} заказов")
                     except Exception as e:
                         st.error(f"Ошибка: {e}")
         
-        with st.expander("📂 Файл"):
+        with st.expander("📂 Импорт из файла", expanded=True):
+            st.caption("Загрузите файл Excel или CSV. Формат: Дата, Тип, Сумма, Чаевые")
             uploaded = st.file_uploader("Выберите файл", type=["xlsx", "xls", "csv"])
-            if uploaded and st.button("📤 ИМПОРТ", width='stretch'):
-                with st.spinner("..."):
+            if uploaded and st.button("📤 ИМПОРТИРОВАТЬ ФАЙЛ", width='stretch'):
+                with st.spinner("Импортируем данные..."):
                     try:
                         import sys
                         sys.path.append(os.path.dirname(__file__))
                         from pages_imports import import_from_excel
                         imported = import_from_excel(uploaded)
                         if imported > 0:
-                            st.success(f"✅ {imported} заказов")
+                            st.success(f"✅ Импортировано {imported} заказов")
                     except Exception as e:
                         st.error(f"Ошибка: {e}")
     
     with tabs[1]:
-        st.subheader("🔄 ПЕРЕСЧЁТ")
+        st.subheader("🔄 ПЕРЕСЧЁТ ДАННЫХ")
+        st.caption("Пересчёт обновит комиссии и баланс безнала по всем заказам")
         try:
             import sys
             sys.path.append(os.path.dirname(__file__))
             from pages_imports import get_accumulated_beznal, recalc_full_db
             current = get_accumulated_beznal()
-            st.metric("Текущий безнал", f"{current:.0f} ₽")
+            st.metric("💰 Текущий накопленный безнал", f"{current:.0f} ₽")
             
-            if st.button("🔄 ПЕРЕСЧИТАТЬ", width='stretch', type="primary"):
-                with st.spinner("..."):
+            if st.button("🔄 ПЕРЕСЧИТАТЬ ВСЁ", width='stretch', type="primary"):
+                with st.spinner("Пересчитываем данные..."):
                     new_total = recalc_full_db()
-                    st.success(f"✅ Новый безнал: {new_total:.0f} ₽")
+                    st.success(f"✅ Пересчёт завершён")
+                    st.metric("💰 Новый безнал", f"{new_total:.0f} ₽")
         except Exception as e:
             st.error(f"Ошибка: {e}")
     
     with tabs[2]:
-        st.subheader("✏️ БЕЗНАЛ")
+        st.subheader("✏️ НАКОПЛЕННЫЙ БЕЗНАЛ")
+        st.caption("Здесь можно вручную установить значение накопленного безнала")
         current = get_accumulated_beznal()
-        st.metric("Текущее", f"{current:.0f} ₽")
+        st.metric("💰 Текущее значение", f"{current:.0f} ₽")
         
         with st.form("change_beznal_form"):
             new_value = st.number_input(
-                "Новое значение",
+                "Новое значение (можно отрицательное)",
                 min_value=None,
                 step=100.0,
                 format="%.0f",
                 value=float(current),
             )
             
-            cols = st.columns(2)
-            with cols[0]:
+            col1, col2 = st.columns(2)
+            with col1:
                 save_btn = st.form_submit_button("💾 СОХРАНИТЬ", use_container_width=True, type="primary")
-            with cols[1]:
-                reset_btn = st.form_submit_button("🔄 СБРОС", use_container_width=True)
+            with col2:
+                reset_btn = st.form_submit_button("🔄 СБРОСИТЬ НА 0", use_container_width=True)
         
         if save_btn:
             set_accumulated_beznal(new_value)
@@ -1943,66 +2208,87 @@ def show_admin_page():
         
         if reset_btn:
             set_accumulated_beznal(0)
-            st.success(f"✅ Сброшено")
+            st.success(f"✅ Значение сброшено на 0")
             log_action("Сброс безнала", "0 ₽")
             st.rerun()
     
     with tabs[3]:
-        st.subheader("🗄 БЭКАПЫ")
+        st.subheader("🗄 УПРАВЛЕНИЕ БЭКАПАМИ")
         
-        cols = st.columns(2)
-        with cols[0]:
-            if st.button("📦 СОЗДАТЬ", width='stretch', type="primary"):
-                with st.spinner("..."):
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📦 СОЗДАТЬ НОВЫЙ БЭКАП", width='stretch', type="primary"):
+                with st.spinner("Создаём бэкап..."):
                     path = create_backup()
                     size = os.path.getsize(path) / 1024
-                    st.success(f"✅ {os.path.basename(path)}")
-                    st.caption(f"📦 {size:.1f} KB")
+                    st.success(f"✅ Бэкап создан: {os.path.basename(path)}")
+                    st.caption(f"📦 Размер: {size:.1f} KB")
         
-        with cols[1]:
-            st.info(f"📁 {os.path.basename(get_backup_dir())}")
+        with col2:
+            backup_dir = get_backup_dir()
+            st.info(f"📁 Папка для бэкапов: **{os.path.basename(backup_dir)}**")
         
         backups = list_backups()
         if backups:
-            st.subheader("📋 СПИСОК")
-            for backup in backups:
-                cols = st.columns([3, 1, 1, 1])
-                with cols[0]:
-                    st.markdown(f"**{backup['name'][:15]}...**")
-                    st.caption(f"🕒 {backup['time'].strftime('%d.%m.%Y %H:%M')}")
-                with cols[1]:
-                    data = download_backup(backup['path'])
-                    st.download_button("📥", data=data, file_name=backup['name'], key=f"d_{backup['name']}")
-                with cols[2]:
-                    if st.button("🔄", key=f"r_{backup['name']}"):
-                        restore_from_backup(backup['path'])
-                        st.success("✅ Восстановлено")
-                        st.cache_data.clear()
-                        st.rerun()
-                with cols[3]:
-                    if st.button("🗑", key=f"del_{backup['name']}"):
-                        os.remove(backup['path'])
-                        st.rerun()
-                st.divider()
-    
-    with tabs[4]:
-        st.subheader("💾 ЗАГРУЗКА")
-        
-        uploaded = st.file_uploader("Выберите .db файл", type=["db"])
-        if uploaded:
-            size = len(uploaded.getbuffer()) / 1024
-            st.caption(f"📦 {size:.1f} KB")
+            st.subheader("📋 СУЩЕСТВУЮЩИЕ БЭКАПЫ")
+            st.caption("Нажмите кнопку для скачивания, восстановления или удаления")
             
-            cols = st.columns(2)
-            with cols[0]:
-                if st.button("✅ ВОССТАНОВИТЬ", width='stretch', type="primary"):
-                    with st.spinner("..."):
-                        create_backup()
-                        if upload_and_restore_backup(uploaded):
-                            st.success("✅ Готово")
+            for backup in backups:
+                with st.container():
+                    cols = st.columns([3, 1, 1, 1])
+                    with cols[0]:
+                        st.markdown(f"**{backup['name']}**")
+                        st.caption(f"📅 {backup['time'].strftime('%d.%m.%Y %H:%M:%S')} | 📦 {backup['size']:.1f} KB")
+                    with cols[1]:
+                        data = download_backup(backup['path'])
+                        st.download_button(
+                            label="📥 Скачать", 
+                            data=data, 
+                            file_name=backup['name'], 
+                            key=f"d_{backup['name']}",
+                            help="Сохранить этот бэкап на компьютер"
+                        )
+                    with cols[2]:
+                        if st.button("🔄 Восстановить", key=f"r_{backup['name']}", help="Восстановить базу данных из этого бэкапа"):
+                            restore_from_backup(backup['path'])
+                            st.success("✅ База восстановлена")
                             st.cache_data.clear()
                             st.rerun()
-            with cols[1]:
+                    with cols[3]:
+                        if st.button("🗑 Удалить", key=f"del_{backup['name']}", help="Удалить этот бэкап навсегда"):
+                            os.remove(backup['path'])
+                            st.success(f"✅ Бэкап удалён")
+                            st.rerun()
+                    st.divider()
+        else:
+            st.info("📭 Пока нет ни одного бэкапа. Нажмите кнопку выше, чтобы создать первый бэкап!")
+    
+    with tabs[4]:
+        st.subheader("💾 ЗАГРУЗКА БЭКАПА")
+        st.caption("Загрузите ранее сохранённый бэкап с компьютера")
+        
+        uploaded = st.file_uploader("Выберите файл бэкапа (.db)", type=["db"])
+        if uploaded:
+            size = len(uploaded.getbuffer()) / 1024
+            st.caption(f"📦 Выбран файл: **{uploaded.name}** | Размер: {size:.1f} KB")
+            
+            st.warning("⚠️ Внимание! При восстановлении текущая база будет перезаписана. Автоматически будет создан бэкап текущей базы.")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ ВОССТАНОВИТЬ ИЗ ФАЙЛА", width='stretch', type="primary"):
+                    with st.spinner("Восстанавливаем базу..."):
+                        try:
+                            create_backup()  # Создаём бэкап текущей базы
+                            if upload_and_restore_backup(uploaded):
+                                st.success("✅ База успешно восстановлена из загруженного файла")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ Ошибка при восстановлении")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка: {e}")
+            with col2:
                 if st.button("❌ ОТМЕНА", width='stretch'):
                     st.rerun()
     
@@ -2013,23 +2299,32 @@ def show_admin_page():
             sys.path.append(os.path.dirname(__file__))
             from pages_imports import normalize_shift_dates, reset_db
             
-            if st.button("🛠 ИСПРАВИТЬ ДАТЫ", width='stretch'):
-                fixed, skipped = normalize_shift_dates()
-                st.success(f"✅ Исправлено: {fixed}, без изменений: {skipped}")
+            with st.expander("🛠 ИСПРАВЛЕНИЕ ФОРМАТА ДАТ", expanded=False):
+                st.caption("Эта операция исправляет даты смен к единому формату ГГГГ-ММ-ДД")
+                if st.button("🛠 ИСПРАВИТЬ ДАТЫ", width='stretch'):
+                    with st.spinner("Исправляем даты..."):
+                        fixed, skipped = normalize_shift_dates()
+                        st.success(f"✅ Исправлено дат: {fixed}, без изменений: {skipped}")
             
             st.divider()
             
-            st.error("🚨 Полный сброс БД")
-            
-            confirm = st.checkbox("Я понимаю, что данные будут удалены")
-            confirm2 = st.checkbox("Я сделал бэкап")
-            
-            if confirm and confirm2:
-                if st.button("🗑 УДАЛИТЬ", type="primary", width='stretch'):
-                    reset_db()
-                    st.success("✅ База сброшена")
-                    st.cache_data.clear()
-                    st.rerun()
+            with st.expander("⚠️ ОПАСНАЯ ЗОНА", expanded=False):
+                st.error("🚨 ПОЛНЫЙ СБРОС БАЗЫ ДАННЫХ")
+                st.caption("Эта операция удалит ВСЕ смены, заказы и расходы. База станет пустой.")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    confirm = st.checkbox("Я понимаю, что все данные будут удалены")
+                with col2:
+                    confirm2 = st.checkbox("Я сделал бэкап")
+                
+                if confirm and confirm2:
+                    if st.button("🗑 УДАЛИТЬ ВСЁ", type="primary", width='stretch'):
+                        with st.spinner("Удаляем данные..."):
+                            reset_db()
+                            st.success("✅ База полностью сброшена")
+                            st.cache_data.clear()
+                            st.rerun()
         except Exception as e:
             st.error(f"Ошибка: {e}")
 
@@ -2065,19 +2360,19 @@ init_session()
 
 # ----- ЛОГИН / РЕГИСТРАЦИЯ -----
 if "username" not in st.session_state:
-    st.title("🚕 ВХОД")
+    st.title("🚕 ВХОД В СИСТЕМУ")
 
-    tabs = st.tabs(["ВХОД", "РЕГИСТРАЦИЯ"])
+    tabs = st.tabs(["🔑 ВХОД", "📝 РЕГИСТРАЦИЯ"])
 
     with tabs[0]:
         with st.form("login_form"):
-            username = st.text_input("Имя")
+            username = st.text_input("Имя пользователя")
             password = st.text_input("Пароль", type="password")
-            btn = st.form_submit_button("ВОЙТИ", width='stretch')
+            btn = st.form_submit_button("🔓 ВОЙТИ", width='stretch')
 
         if btn:
             if not username or not password:
-                st.error("Введите имя и пароль")
+                st.error("Введите имя пользователя и пароль")
             elif authenticate_user(username, password):
                 update_login_stats(username.strip())
                 st.session_state["username"] = username.strip()
@@ -2087,23 +2382,23 @@ if "username" not in st.session_state:
                 st.session_state["session_start"] = datetime.now(MOSCOW_TZ)
                 st.session_state["last_activity"] = datetime.now(MOSCOW_TZ)
                 save_session_to_disk()
-                st.success(f"✅ Добро пожаловать!")
+                st.success(f"✅ Добро пожаловать, {username}!")
                 log_action("Вход", f"Пользователь {username}")
                 st.rerun()
             else:
-                st.error("❌ Неверное имя или пароль")
+                st.error("❌ Неверное имя пользователя или пароль")
 
     with tabs[1]:
-        st.caption("Регистрация")
+        st.caption("Создайте новую учётную запись")
         with st.form("register_form"):
-            reg_username = st.text_input("Имя")
+            reg_username = st.text_input("Имя пользователя")
             reg_password = st.text_input("Пароль", type="password")
-            reg_password2 = st.text_input("Повтор", type="password")
-            reg_btn = st.form_submit_button("ЗАРЕГИСТРИРОВАТЬСЯ", width='stretch')
+            reg_password2 = st.text_input("Повторите пароль", type="password")
+            reg_btn = st.form_submit_button("📝 ЗАРЕГИСТРИРОВАТЬСЯ", width='stretch')
 
         if reg_btn:
             if not reg_username or not reg_password:
-                st.error("Имя и пароль не могут быть пустыми")
+                st.error("Имя пользователя и пароль не могут быть пустыми")
             elif reg_password != reg_password2:
                 st.error("Пароли не совпадают")
             elif len(reg_password) < 4:
@@ -2111,7 +2406,7 @@ if "username" not in st.session_state:
             else:
                 ok = register_user(reg_username, reg_password)
                 if ok:
-                    st.success("✅ Пользователь создан")
+                    st.success("✅ Пользователь создан! Теперь можно войти")
                     log_action("Регистрация", f"Новый пользователь {reg_username}")
                 else:
                     st.error("❌ Такой пользователь уже существует")
@@ -2151,7 +2446,7 @@ with st.sidebar:
         acc = get_accumulated_beznal()
         st.markdown(f"""
         <div class="sidebar-metric">
-            <div class="label">💰 Безнал</div>
+            <div class="label">💰 Накопленный безнал</div>
             <div class="value">{acc:.0f} ₽</div>
         </div>
         """, unsafe_allow_html=True)
@@ -2159,7 +2454,7 @@ with st.sidebar:
         backups = list_backups()
         st.markdown(f"""
         <div class="sidebar-metric">
-            <div class="label">💾 Бэкапы</div>
+            <div class="label">💾 Количество бэкапов</div>
             <div class="value">{len(backups)}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -2186,15 +2481,15 @@ with st.sidebar:
     st.divider()
     
     time_left = get_session_time_remaining()
-    st.caption(f"⏱️ Сессия: {time_left}")
+    st.caption(f"⏱️ Сессия активна ещё: {time_left}")
     
-    if st.button("🚪 ВЫЙТИ", width='stretch'):
+    if st.button("🚪 ВЫЙТИ ИЗ СИСТЕМЫ", width='stretch'):
         log_action("Выход", f"Пользователь {st.session_state['username']}")
         clear_session_disk()
         st.session_state.clear()
         st.rerun()
 
-# Отображаем страницу
+# Отображаем выбранную страницу
 if st.session_state["page"] == "main":
     show_main_page()
 elif st.session_state["page"] == "reports":
