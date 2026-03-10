@@ -111,6 +111,72 @@ def apply_mobile_optimized_css():
             padding-right: 0.5rem !important;
         }
         
+        /* Крупный ник пользователя с иконкой */
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px 15px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .user-avatar {
+            font-size: 3.2rem !important;
+            background: white;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            border: 3px solid #fff;
+        }
+        
+        .user-name {
+            font-size: 2.2rem !important;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            line-height: 1.2;
+            letter-spacing: 0.5px;
+        }
+        
+        .user-name small {
+            font-size: 1rem;
+            display: block;
+            color: rgba(255,255,255,0.9);
+            font-weight: normal;
+            margin-top: 5px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+        
+        /* Альтернативный вариант с эмодзи */
+        .user-info-simple {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: #f0f2f6;
+            padding: 20px 15px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+            border: 2px solid #667eea;
+        }
+        
+        .user-emoji {
+            font-size: 4rem !important;
+        }
+        
+        .user-name-large {
+            font-size: 2.5rem !important;
+            font-weight: bold;
+            color: #1e293b;
+        }
+        
         /* Компактные заголовки для мобильных */
         h1 {
             font-size: 1.4rem !important;
@@ -196,16 +262,17 @@ def apply_mobile_optimized_css():
         
         /* Улучшаем сайдбар для мобильных */
         section[data-testid="stSidebar"] {
-            width: 250px !important;
+            width: 300px !important;
         }
         
         section[data-testid="stSidebar"] > div {
-            padding: 0.3rem !important;
+            padding: 0.5rem !important;
         }
         
         section[data-testid="stSidebar"] .stButton > button {
-            padding: 0.4rem !important;
-            font-size: 0.85rem !important;
+            padding: 0.7rem !important;
+            font-size: 1rem !important;
+            font-weight: 500;
         }
         
         /* Компактные информационные блоки */
@@ -317,6 +384,16 @@ def apply_mobile_optimized_css():
                 flex: 1 1 auto !important;
                 min-width: 120px !important;
             }
+            
+            .user-name {
+                font-size: 1.8rem !important;
+            }
+            
+            .user-avatar {
+                width: 60px;
+                height: 60px;
+                font-size: 2.5rem !important;
+            }
         }
         
         /* Улучшаем touch-взаимодействие */
@@ -341,6 +418,29 @@ def apply_mobile_optimized_css():
             border-radius: 0.3rem;
             margin: 0.2rem 0;
             border-left: 3px solid #ef4444;
+        }
+        
+        /* Стили для метрик в сайдбаре */
+        .sidebar-metric {
+            background: white;
+            padding: 10px;
+            border-radius: 12px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+        
+        .sidebar-metric .label {
+            font-size: 0.8rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .sidebar-metric .value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #1e293b;
         }
         </style>
         """,
@@ -2024,21 +2124,45 @@ st.session_state["db_name"] = get_current_db_name()
 if "page" not in st.session_state:
     st.session_state["page"] = "main"
 
-# Сайдбар
+# Сайдбар с крупным ником пользователя
 with st.sidebar:
-    st.markdown(f"**👤 {st.session_state['username']}**")
+    # Красивый блок с пользователем
+    st.markdown(f"""
+    <div class="user-info">
+        <div class="user-avatar">👤</div>
+        <div class="user-name">
+            {st.session_state['username']}
+            <small>водитель</small>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     try:
         db_path = get_current_db_name()
         if os.path.exists(db_path):
             size = os.path.getsize(db_path) / 1024
-            st.caption(f"📦 {size:.1f} KB")
+            st.markdown(f"""
+            <div class="sidebar-metric">
+                <div class="label">📦 Размер БД</div>
+                <div class="value">{size:.1f} KB</div>
+            </div>
+            """, unsafe_allow_html=True)
         
         acc = get_accumulated_beznal()
-        st.metric("💰 Безнал", f"{acc:.0f} ₽")
+        st.markdown(f"""
+        <div class="sidebar-metric">
+            <div class="label">💰 Безнал</div>
+            <div class="value">{acc:.0f} ₽</div>
+        </div>
+        """, unsafe_allow_html=True)
         
         backups = list_backups()
-        st.caption(f"💾 {len(backups)} бэкапов")
+        st.markdown(f"""
+        <div class="sidebar-metric">
+            <div class="label">💾 Бэкапы</div>
+            <div class="value">{len(backups)}</div>
+        </div>
+        """, unsafe_allow_html=True)
     except:
         pass
     
@@ -2062,7 +2186,7 @@ with st.sidebar:
     st.divider()
     
     time_left = get_session_time_remaining()
-    st.caption(f"⏱️ {time_left}")
+    st.caption(f"⏱️ Сессия: {time_left}")
     
     if st.button("🚪 ВЫЙТИ", width='stretch'):
         log_action("Выход", f"Пользователь {st.session_state['username']}")
