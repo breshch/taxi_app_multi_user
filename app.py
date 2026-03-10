@@ -8,6 +8,7 @@ import shutil
 import io
 import json
 from pathlib import Path
+from collections import Counter
 
 # ===== НАСТРОЙКИ =====
 AUTH_DB = "users.db"  # база с пользователями (логин/пароль)
@@ -17,6 +18,24 @@ SESSION_TIMEOUT = 30 * 24 * 60 * 60  # 30 дней в секундах
 
 rate_nal = 0.78   # процент для нала (для расчёта комиссии)
 rate_card = 0.75  # процент для карты
+
+# Популярные затраты для быстрого выбора
+POPULAR_EXPENSES = [
+    "🚗 Мойка",
+    "💧 Омывайка",
+    "🍔 Еда",
+    "☕ Кофе",
+    "🚬 Сигареты",
+    "🔧 Мелкий ремонт",
+    "🅿️ Парковка",
+    "💰 Штраф",
+    "🧴 Очиститель",
+    "🔋 Зарядка",
+    "🧰 Инструмент",
+    "📱 Связь",
+    "🚕 Аренда",
+    "💊 Аптека"
+]
 
 # Московский часовой пояс
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -278,6 +297,11 @@ def apply_mobile_optimized_css():
             padding: 0.2rem !important;
         }
         
+        /* Стили для популярных затрат */
+        .popular-expense-btn {
+            margin: 0.1rem !important;
+        }
+        
         /* Скрываем лишние элементы на мобильных */
         @media (max-width: 640px) {
             div[data-testid="column"] {
@@ -308,6 +332,15 @@ def apply_mobile_optimized_css():
         /* Компактные метрики в итогах */
         div[data-testid="metric-container"] {
             padding: 0.2rem !important;
+        }
+        
+        /* Стили для статистики расходов */
+        .expense-stat {
+            background-color: #fee2e2;
+            padding: 0.3rem;
+            border-radius: 0.3rem;
+            margin: 0.2rem 0;
+            border-left: 3px solid #ef4444;
         }
         </style>
         """,
@@ -822,6 +855,47 @@ def get_total_extra_expenses(shift_id: int) -> float:
     conn.close()
     return row[0] or 0.0
 
+def get_all_extra_expenses_stats() -> dict:
+    """Получает статистику по всем дополнительным расходам"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT description, SUM(amount), COUNT(*)
+        FROM extra_expenses
+        GROUP BY description
+        ORDER BY SUM(amount) DESC
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    stats = []
+    for row in rows:
+        stats.append({
+            'description': row[0],
+            'total': row[1] or 0,
+            'count': row[2]
+        })
+    return stats
+
+def get_month_extra_expenses(year_month: str) -> float:
+    """Получает общую сумму дополнительных расходов за месяц"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT SUM(e.amount)
+        FROM extra_expenses e
+        JOIN shifts s ON e.shift_id = s.id
+        WHERE strftime('%Y-%m', s.date) = ?
+        """,
+        (year_month,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] or 0.0
+
 def add_order_db(
     shift_id,
     order_type,
@@ -1301,6 +1375,8 @@ def show_main_page():
 
             total_income = nal + card + tips_sum
             st.metric("ДОХОД", f"{total_income:.0f}₽")
+            if total_extra > 0:
+                st.metric("РАСХОДЫ", f"{total_extra:.0f}₽", delta=f"Чистые: {total_income - total_extra:.0f}₽")
 
         # ===== РЕДАКТИРОВАНИЕ =====
         if st.session_state.edit_order_id is not None:
@@ -1400,22 +1476,60 @@ def show_main_page():
         with st.expander("💸 РАСХОДЫ", expanded=False):
             st.caption("Мойка, еда и т.д.")
             
-            with st.form("add_expense_form"):
-                cols = st.columns([2, 1])
-                with cols[0]:
-                    expense_desc = st.text_input("Что", placeholder="мойка", key="expense_desc")
-                with cols[1]:
-                    expense_amount = st.number_input("Сумма", min_value=0.0, step=50.0, format="%.0f", key="expense_amount")
-                submitted_expense = st.form_submit_button("➕ ДОБАВИТЬ", use_container_width=True)
+            # Популярные затраты в виде выпадающего списка
+            st.subheader("📋 Быстрый выбор")
             
-            if submitted_expense and expense_desc and expense_amount > 0:
-                add_extra_expense(shift_id, expense_amount, expense_desc)
-                log_action("Добавление расхода", f"{expense_desc}: {expense_amount:.0f} ₽")
-                st.success(f"✅ Добавлено")
-                st.rerun()
+            # Единая форма с выбором из списка
+            with st.form("quick_expense_form"):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    expense_desc = st.selectbox(
+                        "Что",
+                        options=[""] + POPULAR_EXPENSES,
+                        format_func=lambda x: "Выберите расход..." if x == "" else x,
+                        key="quick_expense_desc"
+                    )
+                with col2:
+                    expense_amount = st.number_input(
+                        "Сумма",
+                        min_value=0.0,
+                        step=50.0,
+                        value=100.0,
+                        format="%.0f",
+                        key="quick_expense_amount"
+                    )
+                with col3:
+                    submitted = st.form_submit_button("➕", use_container_width=True)
+                
+                if submitted and expense_desc and expense_desc != "" and expense_amount > 0:
+                    add_extra_expense(shift_id, expense_amount, expense_desc)
+                    log_action("Добавление расхода", f"{expense_desc}: {expense_amount:.0f} ₽")
+                    st.success(f"✅ Добавлено")
+                    st.rerun()
             
+            st.divider()
+            
+            # Ручной ввод
+            with st.form("manual_expense_form"):
+                st.subheader("✏️ Свой вариант")
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    manual_desc = st.text_input("Что", placeholder="мойка", key="manual_desc")
+                with col2:
+                    manual_amount = st.number_input("Сумма", min_value=0.0, step=50.0, format="%.0f", key="manual_amount")
+                with col3:
+                    manual_submit = st.form_submit_button("➕", use_container_width=True)
+                
+                if manual_submit and manual_desc and manual_amount > 0:
+                    add_extra_expense(shift_id, manual_amount, manual_desc)
+                    log_action("Добавление расхода", f"{manual_desc}: {manual_amount:.0f} ₽")
+                    st.success(f"✅ Добавлено")
+                    st.rerun()
+            
+            # Список текущих расходов
             extra_expenses = get_extra_expenses(shift_id)
             if extra_expenses:
+                st.subheader("📋 Текущие расходы")
                 total_extra = 0
                 for exp in extra_expenses:
                     cols = st.columns([3, 1, 1])
@@ -1469,7 +1583,9 @@ def show_main_page():
                     profit = income - total_costs
                     
                     st.info(f"⛽ {liters:.1f}л = {fuel_cost:.0f}₽")
-                    st.info(f"💰 Прибыль: {profit:.0f}₽")
+                    if total_extra > 0:
+                        st.info(f"💸 Расходы: {total_extra:.0f}₽")
+                    st.success(f"💰 Прибыль: {profit:.0f}₽")
 
                 submitted_close = st.form_submit_button("🔒 ЗАКРЫТЬ", width='stretch', type="primary")
 
@@ -1545,6 +1661,7 @@ def show_reports_page():
         
         df_shifts = get_month_shifts_details_cached(ym)
         totals = get_month_totals_cached(ym)
+        month_extra = get_month_extra_expenses(ym)
         
         st.write("---")
         st.subheader("📄 СМЕНА")
@@ -1574,7 +1691,13 @@ def show_reports_page():
             if extra_expenses:
                 st.subheader("💸 Расходы")
                 exp_df = pd.DataFrame(extra_expenses)
-                st.dataframe(exp_df[['description', 'amount']], width='stretch')
+                st.dataframe(
+                    exp_df[['description', 'amount']].rename(
+                        columns={'description': 'Описание', 'amount': 'Сумма'}
+                    ).style.format({"Сумма": "{:.0f} ₽"}),
+                    width='stretch'
+                )
+                st.metric("💰 Всего расходов", f"{sum(e['amount'] for e in extra_expenses):.0f} ₽")
             
             df_hours = get_orders_by_hour(selected_date)
             if not df_hours.empty:
@@ -1587,6 +1710,26 @@ def show_reports_page():
         cols[0].metric("Нал", f"{totals.get('нал', 0):.0f}₽")
         cols[1].metric("Карта", f"{totals.get('карта', 0):.0f}₽")
         cols[2].metric("Чаевые", f"{totals.get('чаевые', 0):.0f}₽")
+        
+        total_income = totals.get('всего', 0)
+        cols2 = st.columns(3)
+        cols2[0].metric("Всего доход", f"{total_income:.0f}₽")
+        cols2[1].metric("Расходы", f"{month_extra:.0f}₽")
+        cols2[2].metric("Чистые", f"{total_income - month_extra:.0f}₽")
+        
+        # Статистика по расходам
+        expense_stats = get_all_extra_expenses_stats()
+        if expense_stats:
+            st.write("---")
+            st.subheader("📊 СТАТИСТИКА РАСХОДОВ")
+            
+            for stat in expense_stats[:10]:  # Топ-10 расходов
+                st.markdown(f"""
+                <div class="expense-stat">
+                    <strong>{stat['description']}</strong><br>
+                    Всего: {stat['total']:.0f} ₽ | {stat['count']} раз(а)
+                </div>
+                """, unsafe_allow_html=True)
         
     except Exception as e:
         st.error(f"Ошибка: {e}")
