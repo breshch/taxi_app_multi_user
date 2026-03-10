@@ -62,8 +62,8 @@ def clear_session_disk():
     except Exception as e:
         print(f"Ошибка при удалении сессии: {e}")
 
-# ===== КАСТОМНЫЙ ДИЗАЙН / CSS =====
-def apply_custom_css():
+# ===== МОБИЛЬНАЯ ОПТИМИЗАЦИЯ / CSS =====
+def apply_mobile_optimized_css():
     st.markdown(
         """
         <style>
@@ -80,138 +80,234 @@ def apply_custom_css():
             display: none !important;
         }
         
-        /* Убираем отступы сверху в сайдбаре */
-        section[data-testid="stSidebar"] > div {
-            padding-top: 0rem !important;
+        /* МОБИЛЬНАЯ ОПТИМИЗАЦИЯ */
+        
+        /* Убираем отступы */
+        * {
+            box-sizing: border-box;
         }
         
-        .stApp {
-            background: #f3f4f6;
-            color: #111827;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        .main > div {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
         }
-        .block-container {
-            padding-top: 0.8rem;
-            padding-bottom: 0.8rem;
-            max-width: 720px;
-        }
+        
+        /* Компактные заголовки для мобильных */
         h1 {
-            font-size: 1.6rem !important;
+            font-size: 1.4rem !important;
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
+            padding: 0 !important;
             text-align: center;
-            margin-bottom: 0.5rem;
-            color: #0f172a;
         }
-        h2, h3 {
-            color: #1f2933;
+        
+        h2 {
+            font-size: 1.2rem !important;
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.3rem !important;
+        }
+        
+        h3 {
             font-size: 1.1rem !important;
-            margin-top: 0.8rem;
-            margin-bottom: 0.4rem;
+            margin-top: 0.3rem !important;
+            margin-bottom: 0.2rem !important;
         }
-        .streamlit-expanderHeader {
-            font-weight: 600;
-            font-size: 0.95rem;
-        }
-        .stExpander {
-            background: #ffffff !important;
-            border-radius: 0.75rem !important;
-            border: 1px solid #e5e7eb !important;
-            padding: 0.2rem 0.4rem !important;
-        }
+        
+        /* Компактные метрики для мобильных */
         .stMetric {
-            background-color: #ffffff;
-            padding: 0.4rem 0.6rem;
-            border-radius: 0.75rem;
-            border: 1px solid #e5e7eb;
+            padding: 0.3rem !important;
+            margin: 0.1rem 0 !important;
         }
-        button[kind="primary"], button[kind="secondary"] {
-            border-radius: 999px !important;
+        
+        .stMetric label {
+            font-size: 0.7rem !important;
+        }
+        
+        .stMetric [data-testid="stMetricValue"] {
+            font-size: 1.1rem !important;
+        }
+        
+        /* Уменьшаем отступы в контейнерах */
+        .block-container {
             padding-top: 0.5rem !important;
             padding-bottom: 0.5rem !important;
-            font-weight: 600 !important;
-            background-color: #bfdbfe !important;
-            color: #111827 !important;
-            border: 1px solid #93c5fd !important;
+            max-width: 100% !important;
         }
-        button[kind="primary"]:hover, button[kind="secondary"]:hover {
-            background-color: #93c5fd !important;
-            color: #111827 !important;
+        
+        /* Компактные кнопки */
+        .stButton > button {
+            padding: 0.3rem 0.5rem !important;
+            font-size: 0.85rem !important;
+            margin: 0.1rem 0 !important;
+            min-height: 2.2rem;
         }
+        
+        /* Компактные поля ввода */
+        .stTextInput > div > div > input {
+            padding: 0.3rem !important;
+            font-size: 0.9rem !important;
+            min-height: 2.2rem;
+        }
+        
+        .stNumberInput > div > div > input {
+            padding: 0.3rem !important;
+            font-size: 0.9rem !important;
+            min-height: 2.2rem;
+        }
+        
+        .stSelectbox > div > div {
+            min-height: 2.2rem;
+            font-size: 0.9rem !important;
+        }
+        
+        /* Компактные экспандеры */
+        .stExpander {
+            margin: 0.2rem 0 !important;
+        }
+        
+        .stExpander > details > summary {
+            padding: 0.4rem !important;
+            font-size: 0.95rem !important;
+        }
+        
+        /* Компактные разделители */
         hr {
-            margin: 0.3rem 0 !important;
-            border-color: #e5e7eb;
+            margin: 0.5rem 0 !important;
         }
-        .stForm, .stMarkdown, .stNumberInput, .stSelectbox, .stFileUploader {
-            margin-bottom: 0.4rem !important;
+        
+        /* Улучшаем сайдбар для мобильных */
+        section[data-testid="stSidebar"] {
+            width: 250px !important;
         }
-        .stContainer {
-            background-color: transparent;
+        
+        section[data-testid="stSidebar"] > div {
+            padding: 0.3rem !important;
         }
+        
+        section[data-testid="stSidebar"] .stButton > button {
+            padding: 0.4rem !important;
+            font-size: 0.85rem !important;
+        }
+        
+        /* Компактные информационные блоки */
+        .stAlert {
+            padding: 0.4rem !important;
+            margin: 0.2rem 0 !important;
+            font-size: 0.85rem !important;
+        }
+        
+        /* Компактные таблицы */
+        .stDataFrame {
+            font-size: 0.8rem !important;
+        }
+        
+        .stDataFrame td, .stDataFrame th {
+            padding: 0.2rem !important;
+        }
+        
+        /* Компактные вкладки */
+        .stTabs [data-baseweb="tab"] {
+            padding: 0.3rem 0.5rem !important;
+            font-size: 0.8rem !important;
+        }
+        
+        /* Кастомные классы для мобильных */
+        .stats-box {
+            padding: 0.4rem !important;
+            margin: 0.2rem 0 !important;
+            font-size: 0.9rem !important;
+        }
+        
+        .stat-value {
+            font-size: 1rem !important;
+        }
+        
+        .stat-label {
+            font-size: 0.65rem !important;
+        }
+        
         .warning-box {
-            background-color: #fff3cd;
-            border: 1px solid #ffeeba;
-            color: #856404;
-            padding: 0.5rem;
-            border-radius: 0.5rem;
-            margin: 0.5rem 0;
+            padding: 0.3rem !important;
+            font-size: 0.8rem !important;
         }
+        
         .success-box {
-            background-color: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-            padding: 0.5rem;
-            border-radius: 0.5rem;
-            margin: 0.5rem 0;
+            padding: 0.3rem !important;
+            font-size: 0.8rem !important;
         }
-        /* Стили для кнопок навигации */
-        div.row-widget.stButton > button {
-            text-align: left;
-            padding: 0.5rem 1rem;
-            margin: 0.2rem 0;
-            border-radius: 0.5rem;
-            background-color: #f9fafb;
-            border: 1px solid #e5e7eb;
-            font-weight: normal;
-        }
-        div.row-widget.stButton > button:hover {
-            background-color: #e5e7eb;
-            border-color: #93c5fd;
-        }
-        div.row-widget.stButton > button.active-nav {
-            background-color: #bfdbfe;
-            border-color: #93c5fd;
-            font-weight: 600;
-        }
-        /* Стили для загрузки файлов */
-        .stFileUploader {
-            border: 1px dashed #cbd5e1;
-            border-radius: 0.5rem;
-            padding: 1rem;
-            background-color: white;
-        }
-        .stFileUploader:hover {
-            border-color: #93c5fd;
-            background-color: #f8fafc;
-        }
-        /* Стили для таймера сессии */
+        
         .session-timer {
-            font-size: 0.8rem;
-            color: #64748b;
-            text-align: center;
-            margin-top: 1rem;
-            padding: 0.5rem;
-            border-top: 1px solid #e2e8f0;
+            font-size: 0.7rem !important;
+            padding: 0.2rem !important;
         }
-        /* Стили для кнопок добавления расходов */
-        .add-expense-btn {
-            margin-top: 0.5rem;
-            margin-bottom: 0.5rem;
+        
+        /* Улучшаем отображение списка заказов */
+        div[data-testid="stVerticalBlock"] > div > div > div > div[data-testid="stVerticalBlock"] {
+            padding: 0.3rem !important;
+            margin: 0.1rem 0 !important;
         }
-        .expense-item {
-            background-color: #f8fafc;
-            padding: 0.5rem;
-            border-radius: 0.5rem;
-            margin-bottom: 0.5rem;
-            border-left: 3px solid #ef4444;
+        
+        /* Компактные колонки */
+        .row-widget.stHorizontal {
+            gap: 0.2rem !important;
+        }
+        
+        /* Убираем лишние отступы */
+        .stMarkdown {
+            margin-bottom: 0.2rem !important;
+        }
+        
+        /* Компактные чекбоксы */
+        .stCheckbox {
+            min-height: 1.5rem;
+        }
+        
+        .stCheckbox > div {
+            font-size: 0.85rem !important;
+        }
+        
+        /* Компактные загрузчики файлов */
+        .stFileUploader {
+            padding: 0.3rem !important;
+        }
+        
+        /* Компактный таймер */
+        .session-timer {
+            font-size: 0.7rem !important;
+            margin-top: 0.3rem !important;
+            padding: 0.2rem !important;
+        }
+        
+        /* Скрываем лишние элементы на мобильных */
+        @media (max-width: 640px) {
+            div[data-testid="column"] {
+                min-width: auto !important;
+            }
+            
+            /* Делаем колонки более гибкими */
+            .row-widget.stHorizontal {
+                flex-wrap: wrap !important;
+            }
+            
+            .row-widget.stHorizontal > div {
+                flex: 1 1 auto !important;
+                min-width: 120px !important;
+            }
+        }
+        
+        /* Улучшаем touch-взаимодействие */
+        button, input, select {
+            touch-action: manipulation !important;
+        }
+        
+        /* Увеличиваем область нажатия для маленьких кнопок */
+        .stButton > button {
+            min-width: 44px !important;
+        }
+        
+        /* Компактные метрики в итогах */
+        div[data-testid="metric-container"] {
+            padding: 0.2rem !important;
         }
         </style>
         """,
@@ -993,7 +1089,7 @@ def upload_and_restore_backup(uploaded_file):
 # ===== ФУНКЦИИ ДЛЯ СТРАНИЦ =====
 def show_main_page():
     """Отображает главную страницу с учётом смен"""
-    st.title(f"🚕 ПРОГРАММА УЧЁТА — {st.session_state['username']}")
+    st.title(f"🚕 {st.session_state['username']}")
 
     # для редактирования заказов
     if "edit_order_id" not in st.session_state:
@@ -1006,16 +1102,16 @@ def show_main_page():
     open_shift_data = get_open_shift()
 
     if not open_shift_data:
-        st.info("📭 СЕЙЧАС НЕТ ОТКРЫТОЙ СМЕНЫ")
+        st.info("📭 Нет открытой смены")
 
-        with st.expander("📝 ОТКРЫТЬ НОВУЮ СМЕНУ", expanded=True):
+        with st.expander("📝 ОТКРЫТЬ СМЕНУ", expanded=True):
             with st.form("open_shift_form"):
                 date_input = st.date_input(
-                    "Дата смены",
+                    "Дата",
                     value=date.today(),
                 )
-                st.caption(f"Выбрано: {date_input.strftime('%d.%m.%Y')}")
-                submitted_tpl = st.form_submit_button("📂 ОТКРЫТЬ СМЕНУ", width='stretch')
+                st.caption(f"{date_input.strftime('%d.%m.%Y')}")
+                submitted_tpl = st.form_submit_button("📂 ОТКРЫТЬ", width='stretch')
 
             if submitted_tpl:
                 date_str_db = date_input.strftime("%Y-%m-%d")
@@ -1031,14 +1127,14 @@ def show_main_page():
             date_show = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m.%Y")
         except Exception:
             date_show = date_str
-        st.success(f"📅 Открыта смена: {date_show}")
+        st.success(f"📅 {date_show}")
 
         acc = get_accumulated_beznal()
         if acc != 0:
-            st.metric("Накопленный безнал", f"{acc:.0f} ₽")
+            st.metric("💰 Безнал", f"{acc:.0f} ₽")
 
         # ===== ДОБАВЛЕНИЕ ЗАКАЗА =====
-        with st.expander("➕ ДОБАВИТЬ ЗАКАЗ", expanded=True):
+        with st.expander("➕ ЗАКАЗ", expanded=True):
             # Используем счётчики для создания уникальных ключей
             if "amount_counter" not in st.session_state:
                 st.session_state.amount_counter = 0
@@ -1053,39 +1149,39 @@ def show_main_page():
                 c1, c2 = st.columns(2)
                 with c1:
                     amount_str = st.text_input(
-                        "Сумма заказа, ₽",
+                        "Сумма",
                         value="",
-                        placeholder="например, 650",
+                        placeholder="650",
                         key=amount_key
                     )
                 with c2:
                     payment = st.selectbox(
-                        "Тип оплаты", 
-                        ["НАЛИЧНЫЕ", "КАРТА"],
+                        "Тип", 
+                        ["НАЛ", "КАРТА"],
                         key="payment_input"
                     )
 
                 tips_str = st.text_input(
-                    "Чаевые, ₽",
+                    "Чаевые",
                     value="",
-                    placeholder="0 (если без чаевых)",
+                    placeholder="0",
                     key=tips_key
                 )
 
                 now_moscow = datetime.now(MOSCOW_TZ)
-                st.caption(f"🕒 Текущее время: {now_moscow.strftime('%H:%M')}")
+                st.caption(f"🕒 {now_moscow.strftime('%H:%M')}")
 
-                submitted = st.form_submit_button("💾 СОХРАНИТЬ ЗАКАЗ", width='stretch')
+                submitted = st.form_submit_button("💾 СОХРАНИТЬ", width='stretch')
 
             if submitted:
                 try:
                     amount = float(amount_str.replace(",", "."))
                 except ValueError:
-                    st.error("Введите сумму заказа числом.")
+                    st.error("Введите сумму числом")
                     st.stop()
 
                 if amount <= 0:
-                    st.error("Сумма заказа должна быть больше нуля.")
+                    st.error("Сумма > 0")
                     st.stop()
 
                 tips = 0.0
@@ -1093,12 +1189,12 @@ def show_main_page():
                     try:
                         tips = float(tips_str.replace(",", "."))
                     except ValueError:
-                        st.error("Чаевые нужно вводить числом (или оставить пустым).")
+                        st.error("Чаевые числом")
                         st.stop()
 
                 order_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
 
-                if payment == "НАЛИЧНЫЕ":
+                if payment == "НАЛ":
                     typ = "нал"
                     final_wo_tips = amount
                     commission = amount * (1 - rate_nal)
@@ -1120,20 +1216,18 @@ def show_main_page():
                         add_to_accumulated_beznal(beznal_added)
 
                     human_type = "Нал" if typ == "нал" else "Карта"
-                    log_action("Добавление заказа", f"{human_type}, сумма {amount:.0f} ₽, чаевые {tips:.0f} ₽")
+                    log_action("Добавление заказа", f"{human_type}, {amount:.0f} ₽, чаевые {tips:.0f} ₽")
                     
                     # Увеличиваем счётчики для создания новых ключей
                     st.session_state.amount_counter += 1
                     st.session_state.tips_counter += 1
                     
-                    st.success(
-                        f"✅ Заказ добавлен: {human_type}, {amount:.0f} ₽, чаевые {tips:.0f} ₽"
-                    )
+                    st.success(f"✅ {human_type} {amount:.0f}₽")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Ошибка при сохранении заказа: {e}")
+                    st.error(f"Ошибка: {e}")
 
-        # ===== СПИСОК ЗАКАЗОВ + КНОПКИ РЕДАКТА/УДАЛЕНИЯ =====
+        # ===== СПИСОК ЗАКАЗОВ =====
         orders = get_shift_orders(shift_id)
         totals = get_shift_totals(shift_id) if orders else {}
         nal = totals.get("нал", 0.0)
@@ -1142,47 +1236,37 @@ def show_main_page():
         beznal_this = totals.get("безнал_смена", 0.0)
 
         if orders:
-            st.subheader("📋 ЗАКАЗЫ ЗА СМЕНУ")
+            st.subheader("📋 ЗАКАЗЫ")
 
             for i, (order_id, typ, amount, tips, comm, total, beznal_add, order_time) in enumerate(
                 orders, 1
             ):
                 with st.container():
-                    left, mid, right = st.columns([3, 1, 1])
-
-                    with left:
-                        time_str = f"{order_time} · " if order_time else ""
-                        st.markdown(
-                            f"**#{i}** · {time_str}"
-                            f"{'💵 Нал' if typ == 'нал' else '💳 Карта'} · "
-                            f"{amount:.0f} ₽"
-                        )
-                        details = []
+                    cols = st.columns([2, 1, 1, 1])
+                    
+                    with cols[0]:
+                        time_str = f"{order_time}" if order_time else ""
+                        type_icon = "💵" if typ == "нал" else "💳"
+                        st.markdown(f"**#{i}** {time_str} {type_icon} {amount:.0f}₽")
                         if tips > 0:
-                            details.append(f"чаевые {tips:.0f} ₽")
-                        if beznal_add > 0:
-                            details.append(f"+{beznal_add:.0f} ₽ в безнал")
-                        elif beznal_add < 0:
-                            details.append(f"{beznal_add:.0f} ₽ списано с безнала")
-                        if details:
-                            st.caption(", ".join(details))
-
-                    with right:
-                        st.markdown(f"**Вам:** {total:.0f} ₽")
-
-                    with mid:
+                            st.caption(f"💝 {tips:.0f}")
+                    
+                    with cols[1]:
+                        st.markdown(f"**{total:.0f}**")
+                    
+                    with cols[2]:
                         edit_key = f"edit_{order_id}"
-                        delete_key = f"delete_{order_id}"
-                        confirm_key = f"confirm_{order_id}"
-
                         if st.button("✏️", key=edit_key):
                             st.session_state.edit_order_id = order_id
                             st.session_state.edit_original_type = typ
                             st.session_state.edit_original_amount = float(amount)
                             st.session_state.edit_original_tips = float(tips)
                             st.rerun()
-
-                        # Удаление с подтверждением
+                    
+                    with cols[3]:
+                        delete_key = f"delete_{order_id}"
+                        confirm_key = f"confirm_{order_id}"
+                        
                         if confirm_key not in st.session_state.confirm_delete:
                             st.session_state.confirm_delete[confirm_key] = False
                         
@@ -1191,37 +1275,36 @@ def show_main_page():
                             st.rerun()
                         
                         if st.session_state.confirm_delete.get(confirm_key, False):
-                            st.markdown('<div class="warning-box">Удалить? Нажмите 🗑 ещё раз</div>', unsafe_allow_html=True)
-                            if st.button("✅ ДА", key=f"yes_{order_id}"):
+                            st.caption("Удалить?")
+                            if st.button("✅", key=f"yes_{order_id}"):
                                 if beznal_add != 0:
                                     add_to_accumulated_beznal(-beznal_add)
                                 delete_order_db(order_id)
-                                log_action("Удаление заказа", f"Заказ #{i}, сумма {amount:.0f} ₽")
+                                log_action("Удаление заказа", f"Заказ #{i}")
                                 st.session_state.confirm_delete[confirm_key] = False
-                                st.success(f"Заказ #{i} удалён.")
+                                st.success(f"Заказ #{i} удалён")
                                 st.rerun()
 
                 st.divider()
 
-            # ИТОГИ ПО СМЕНЕ
-            st.subheader("💼 ИТОГИ ПО СМЕНЕ")
+            # ИТОГИ
+            st.subheader("💰 ИТОГИ")
             
-            # Получаем дополнительные расходы
             extra_expenses = get_extra_expenses(shift_id)
             total_extra = sum(e['amount'] for e in extra_expenses)
             
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Наличные", f"{nal:.0f} ₽")
-            col2.metric("Карта", f"{card:.0f} ₽")
-            col3.metric("Чаевые", f"{tips_sum:.0f} ₽")
-            col4.metric("Изм. безнала", f"{beznal_this:.0f} ₽")
+            cols = st.columns(4)
+            cols[0].metric("Нал", f"{nal:.0f}₽")
+            cols[1].metric("Карта", f"{card:.0f}₽")
+            cols[2].metric("Чаевые", f"{tips_sum:.0f}₽")
+            cols[3].metric("Δ безнал", f"{beznal_this:.0f}₽")
 
             total_income = nal + card + tips_sum
-            st.markdown(f'<div class="stats-box" style="margin-top:1rem"><span class="stat-label">ДОХОД ЗА СМЕНУ</span> <span class="stat-value">{total_income:.0f} ₽</span></div>', unsafe_allow_html=True)
+            st.metric("ДОХОД", f"{total_income:.0f}₽")
 
-        # ===== ФОРМА РЕДАКТИРОВАНИЯ ВЫБРАННОГО ЗАКАЗА =====
+        # ===== РЕДАКТИРОВАНИЕ =====
         if st.session_state.edit_order_id is not None:
-            st.subheader("✏️ РЕДАКТИРОВАНИЕ ЗАКАЗА")
+            st.subheader("✏️ РЕДАКТИРОВАНИЕ")
             order_id = st.session_state.edit_order_id
             orig_type = st.session_state.get("edit_original_type", "нал")
             orig_amount = st.session_state.get("edit_original_amount", 0.0)
@@ -1231,46 +1314,39 @@ def show_main_page():
                 col1, col2 = st.columns(2)
                 with col1:
                     new_amount_str = st.text_input(
-                        "Новая сумма заказа, ₽",
+                        "Новая сумма",
                         value=f"{orig_amount:.0f}",
                     )
                 with col2:
-                    new_payment = st.selectbox(
-                        "Тип оплаты",
-                        ["НАЛИЧНЫЕ", "КАРТА"],
-                        index=0 if orig_type == "нал" else 1,
-                    )
+                    options = ["НАЛ", "КАРТА"]
+                    idx = 0 if orig_type == "нал" else 1
+                    new_payment = st.selectbox("Тип", options, index=idx)
 
                 new_tips_str = st.text_input(
-                    "Новые чаевые, ₽",
+                    "Новые чаевые",
                     value=f"{orig_tips:.0f}",
                 )
 
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
-                    save_btn = st.form_submit_button("💾 СОХРАНИТЬ", width='stretch')
+                    save_btn = st.form_submit_button("💾 СОХР", width='stretch')
                 with col_btn2:
-                    cancel_btn = st.form_submit_button("ОТМЕНА", width='stretch')
+                    cancel_btn = st.form_submit_button("❌", width='stretch')
 
-            if cancel_btn and not save_btn:
+            if cancel_btn:
                 st.session_state.edit_order_id = None
                 st.rerun()
 
             if save_btn:
                 try:
                     new_amount = float(new_amount_str.replace(",", "."))
+                    new_tips = float(new_tips_str.replace(",", "."))
                 except ValueError:
-                    st.error("Сумма заказа должна быть числом.")
+                    st.error("Введите числа")
                     st.stop()
 
                 if new_amount <= 0:
-                    st.error("Сумма заказа должна быть больше нуля.")
-                    st.stop()
-
-                try:
-                    new_tips = float(new_tips_str.replace(",", "."))
-                except ValueError:
-                    st.error("Чаевые должны быть числом.")
+                    st.error("Сумма > 0")
                     st.stop()
 
                 conn = get_db_connection()
@@ -1283,19 +1359,18 @@ def show_main_page():
                 conn.close()
 
                 if not row:
-                    st.error("Не удалось найти заказ в базе.")
+                    st.error("Заказ не найден")
                     st.stop()
 
                 old_type, old_amount, old_tips, old_beznal = row
 
-                if new_payment == "НАЛИЧНЫЕ":
-                    new_type = "нал"
-                    final_wo_tips = new_amount
+                new_type = "нал" if new_payment == "НАЛ" else "карта"
+
+                if new_type == "нал":
                     commission = new_amount * (1 - rate_nal)
                     total = new_amount + new_tips
                     new_beznal = -commission
                 else:
-                    new_type = "карта"
                     final_wo_tips = new_amount * rate_card
                     commission = new_amount - final_wo_tips
                     total = final_wo_tips + new_tips
@@ -1315,90 +1390,76 @@ def show_main_page():
                     new_beznal,
                 )
 
-                log_action("Редактирование заказа", f"Заказ #{order_id}, новая сумма {new_amount:.0f} ₽")
-                st.success("✅ Изменения сохранены.")
+                log_action("Редактирование", f"Заказ #{order_id}")
+                st.success("✅ Сохранено")
                 st.session_state.edit_order_id = None
                 st.rerun()
 
-        # ===== УПРАВЛЕНИЕ ДОПОЛНИТЕЛЬНЫМИ РАСХОДАМИ =====
+        # ===== ДОПОЛНИТЕЛЬНЫЕ РАСХОДЫ =====
         st.write("---")
-        with st.expander("💸 ДОПОЛНИТЕЛЬНЫЕ РАСХОДЫ", expanded=False):
-            st.caption("Добавьте несколько расходов: мойка, омывайка, еда, и т.д.")
+        with st.expander("💸 РАСХОДЫ", expanded=False):
+            st.caption("Мойка, еда и т.д.")
             
-            # Форма для добавления нового расхода
             with st.form("add_expense_form"):
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    expense_desc = st.text_input("Описание расхода", placeholder="например: мойка", key="expense_desc")
-                with col2:
-                    expense_amount = st.number_input("Сумма, ₽", min_value=0.0, step=50.0, format="%.0f", key="expense_amount")
-                with col3:
-                    submitted_expense = st.form_submit_button("➕ ДОБАВИТЬ", use_container_width=True)
+                cols = st.columns([2, 1])
+                with cols[0]:
+                    expense_desc = st.text_input("Что", placeholder="мойка", key="expense_desc")
+                with cols[1]:
+                    expense_amount = st.number_input("Сумма", min_value=0.0, step=50.0, format="%.0f", key="expense_amount")
+                submitted_expense = st.form_submit_button("➕ ДОБАВИТЬ", use_container_width=True)
             
             if submitted_expense and expense_desc and expense_amount > 0:
                 add_extra_expense(shift_id, expense_amount, expense_desc)
                 log_action("Добавление расхода", f"{expense_desc}: {expense_amount:.0f} ₽")
-                st.success(f"✅ Расход добавлен: {expense_desc} - {expense_amount:.0f} ₽")
+                st.success(f"✅ Добавлено")
                 st.rerun()
             
-            # Список добавленных расходов
             extra_expenses = get_extra_expenses(shift_id)
             if extra_expenses:
-                st.subheader("📋 ДОБАВЛЕННЫЕ РАСХОДЫ")
                 total_extra = 0
                 for exp in extra_expenses:
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    with col1:
+                    cols = st.columns([3, 1, 1])
+                    with cols[0]:
                         st.markdown(f"**{exp['description']}**")
-                    with col2:
-                        st.markdown(f"{exp['amount']:.0f} ₽")
-                    with col3:
-                        if st.button("🗑", key=f"del_exp_{exp['id']}", help="Удалить расход"):
+                    with cols[1]:
+                        st.markdown(f"{exp['amount']:.0f}₽")
+                    with cols[2]:
+                        if st.button("🗑", key=f"del_exp_{exp['id']}"):
                             delete_extra_expense(exp['id'])
                             log_action("Удаление расхода", f"{exp['description']}")
                             st.rerun()
                     total_extra += exp['amount']
                     st.divider()
                 
-                st.markdown(f"**ИТОГО РАСХОДОВ: {total_extra:.0f} ₽**")
-            else:
-                st.info("Пока нет добавленных расходов")
+                st.markdown(f"**ИТОГО: {total_extra:.0f}₽**")
 
         # ===== ЗАКРЫТИЕ СМЕНЫ =====
         st.write("---")
-        with st.expander("🔒 ЗАКРЫТЬ СМЕНУ"):
+        with st.expander("🔒 ЗАКРЫТЬ", expanded=False):
             last_consumption, last_price = get_last_fuel_params()
-            
-            # Получаем общую сумму доп расходов
             total_extra = get_total_extra_expenses(shift_id)
 
             with st.form("close_form"):
-                st.subheader("⛽ ТОПЛИВО")
-                km = st.number_input(
-                    "Километраж за смену (км)", min_value=0, step=10, value=100
-                )
+                km = st.number_input("Км", min_value=0, step=10, value=100)
 
-                col1, col2 = st.columns(2)
-                with col1:
+                cols = st.columns(2)
+                with cols[0]:
                     consumption = st.number_input(
-                        "Расход, л/100км",
+                        "Расход",
                         min_value=0.0,
                         step=0.5,
                         value=float(f"{last_consumption:.1f}"),
                         format="%.1f",
                     )
-                with col2:
+                with cols[1]:
                     fuel_price = st.number_input(
-                        "Цена бензина, ₽/л",
+                        "Цена",
                         min_value=0.0,
                         step=1.0,
                         value=float(f"{last_price:.1f}"),
                         format="%.1f",
                     )
 
-                st.divider()
-                
-                # Расчёт итогов
                 if km > 0 and consumption > 0 and fuel_price > 0:
                     liters = (km / 100) * consumption
                     fuel_cost = liters * fuel_price
@@ -1407,37 +1468,10 @@ def show_main_page():
                     total_costs = fuel_cost + total_extra
                     profit = income - total_costs
                     
-                    st.markdown(f"""
-                    <div class="stats-box">
-                        <span class="stat-label">РАСХОДЫ:</span><br>
-                        ⛽ Бензин: {fuel_cost:.0f} ₽<br>
-                        💸 Доп. расходы ({len(extra_expenses)} шт): {total_extra:.0f} ₽<br>
-                        <span class="stat-label">ИТОГО РАСХОДОВ: {total_costs:.0f} ₽</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown(f"""
-                    <div class="stats-box">
-                        <span class="stat-label">ДОХОД ЗА СМЕНУ:</span> {income:.0f} ₽<br>
-                        <span class="stat-label">ЧИСТАЯ ПРИБЫЛЬ:</span> {profit:.0f} ₽
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    liters = 0.0
-                    fuel_cost = 0.0
-                    total_costs = total_extra
-                    income = nal + card + tips_sum
-                    profit = income - total_costs
-                    
-                    st.markdown(f"""
-                    <div class="stats-box">
-                        <span class="stat-label">ДОП. РАСХОДЫ ({len(extra_expenses)} шт):</span> {total_extra:.0f} ₽<br>
-                        <span class="stat-label">ДОХОД ЗА СМЕНУ:</span> {income:.0f} ₽<br>
-                        <span class="stat-label">ПРИБЫЛЬ:</span> {profit:.0f} ₽
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.info(f"⛽ {liters:.1f}л = {fuel_cost:.0f}₽")
+                    st.info(f"💰 Прибыль: {profit:.0f}₽")
 
-                submitted_close = st.form_submit_button("🔒 ЗАКРЫТЬ СМЕНУ", width='stretch', type="primary")
+                submitted_close = st.form_submit_button("🔒 ЗАКРЫТЬ", width='stretch', type="primary")
 
             if submitted_close:
                 if km > 0 and consumption > 0 and fuel_price > 0:
@@ -1454,32 +1488,26 @@ def show_main_page():
                 profit = income - total_costs
 
                 log_action("Закрытие смены", 
-                          f"Дата: {date_str}, доход: {income:.0f} ₽, расходы: {total_costs:.0f} ₽, прибыль: {profit:.0f} ₽")
+                          f"Дата: {date_str}, доход: {income:.0f} ₽, прибыль: {profit:.0f} ₽")
                 
                 st.success("✅ Смена закрыта")
                 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Доход", f"{income:.0f} ₽")
-                col2.metric("Расходы", f"{total_costs:.0f} ₽")
-                col3.metric("Прибыль", f"{profit:.0f} ₽")
+                cols = st.columns(3)
+                cols[0].metric("Доход", f"{income:.0f}₽")
+                cols[1].metric("Расходы", f"{total_costs:.0f}₽")
+                cols[2].metric("Прибыль", f"{profit:.0f}₽")
                 
-                st.info("📊 Проверьте отчёт в разделе ОТЧЁТЫ для детализации.")
-                
-                # Очищаем кэш после закрытия смены, чтобы отчёты обновились
                 st.cache_data.clear()
 
 def show_reports_page():
     """Отображает страницу отчётов"""
-    # Проверяем и создаём таблицы
     if not check_and_create_tables():
-        st.error("❌ Ошибка при проверке таблиц базы данных")
+        st.error("❌ Ошибка БД")
         return
     
-    st.title(f"📊 ОТЧЁТЫ — {st.session_state['username']}")
+    st.title(f"📊 ОТЧЁТЫ")
     
-    # Импортируем функции из pages_imports.py
     try:
-        # Добавляем путь к текущей директории для импорта
         import sys
         sys.path.append(os.path.dirname(__file__))
         
@@ -1493,14 +1521,12 @@ def show_reports_page():
             format_month_option
         )
         
-        # Проверяем, есть ли закрытые смены
         year_months = get_available_year_months_cached()
         
         if not year_months:
-            st.info("📭 Пока нет закрытых смен с заказами для формирования отчёта.")
+            st.info("📭 Нет закрытых смен")
             
-            # Показываем пример данных
-            with st.expander("📋 Пример формата данных для импорта"):
+            with st.expander("📋 Пример"):
                 example_data = pd.DataFrame({
                     "Дата": ["01.02.2026", "02.02.2026"],
                     "Тип": ["нал", "карта"],
@@ -1508,140 +1534,71 @@ def show_reports_page():
                     "Чаевые": [100, 0]
                 })
                 st.dataframe(example_data, width='stretch')
-                st.caption("Загрузите файл в таком формате через страницу АДМИНКА")
             return
         
-        # Выбор месяца
         ym = st.selectbox(
-            "📅 Выберите месяц",
+            "📅 Месяц",
             year_months,
             format_func=format_month_option,
             index=0,
         )
         
-        # Получаем данные за месяц
         df_shifts = get_month_shifts_details_cached(ym)
         totals = get_month_totals_cached(ym)
         
-        # Отчёт по конкретной смене
         st.write("---")
-        st.subheader("📄 Отчёт по смене")
+        st.subheader("📄 СМЕНА")
         
         if df_shifts.empty:
-            st.write("Нет закрытых смен с заказами за выбранный месяц.")
+            st.write("Нет данных")
         else:
-            # Выбор даты
-            available_dates = df_shifts["Дата"].unique().tolist()
-            selected_date_display = st.selectbox("📆 Дата смены", options=available_dates)
+            dates = df_shifts["Дата"].unique().tolist()
+            selected = st.selectbox("📆 Дата", options=dates)
             
-            # Конвертируем дату обратно в ISO формат для запроса
             try:
-                selected_date = datetime.strptime(selected_date_display, "%d.%m.%Y").strftime("%Y-%m-%d")
+                selected_date = datetime.strptime(selected, "%d.%m.%Y").strftime("%Y-%m-%d")
             except:
-                selected_date = selected_date_display
+                selected_date = selected
             
-            # Показываем детали смены
-            df_shift_summary = df_shifts[df_shifts["Дата"] == selected_date_display].copy()
-            if not df_shift_summary.empty:
-                st.dataframe(
-                    df_shift_summary.style.format({
-                        "Нал": "{:.0f}",
-                        "Карта": "{:.0f}",
-                        "Чаевые": "{:.0f}",
-                        "Δ безнал": "{:.0f}",
-                        "Км": "{:.0f}",
-                        "Литры": "{:.1f}",
-                        "Цена": "{:.1f}",
-                        "Всего": "{:.0f}",
-                    }),
-                    width='stretch'
-                )
+            df_summary = df_shifts[df_shifts["Дата"] == selected].copy()
+            if not df_summary.empty:
+                st.dataframe(df_summary, width='stretch')
             
-            # Показываем заказы в смене
             shift_id = get_closed_shift_id_by_date(selected_date)
             df_orders = get_shift_orders_df(shift_id)
             if not df_orders.empty:
-                st.subheader("📋 Заказы в смене")
-                st.dataframe(
-                    df_orders.style.format({
-                        "Сумма": "{:.0f}",
-                        "Чаевые": "{:.0f}",
-                        "Δ безнал": "{:.0f}",
-                        "Вам": "{:.0f}",
-                    }),
-                    width='stretch'
-                )
+                st.subheader("📋 Заказы")
+                st.dataframe(df_orders, width='stretch')
             
-            # Получаем доп расходы для этой смены
             extra_expenses = get_extra_expenses(shift_id)
             if extra_expenses:
-                st.subheader("💸 Дополнительные расходы")
+                st.subheader("💸 Расходы")
                 exp_df = pd.DataFrame(extra_expenses)
-                st.dataframe(
-                    exp_df[['description', 'amount']].rename(columns={'description': 'Описание', 'amount': 'Сумма'}).style.format({"Сумма": "{:.0f} ₽"}),
-                    width='stretch'
-                )
+                st.dataframe(exp_df[['description', 'amount']], width='stretch')
             
-            # График по часам
             df_hours = get_orders_by_hour(selected_date)
             if not df_hours.empty:
-                st.subheader("📊 Заказы по часам")
-                st.bar_chart(data=df_hours, x="Час", y="Заказов", width='stretch')
+                st.bar_chart(data=df_hours, x="Час", y="Заказов")
         
-        # Итоги за месяц
         st.write("---")
-        st.subheader("📊 Итоги за месяц")
+        st.subheader("📊 ИТОГИ ЗА МЕСЯЦ")
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Наличные", f"{totals.get('нал', 0):.0f} ₽")
-        col2.metric("Карта", f"{totals.get('карта', 0):.0f} ₽")
-        col3.metric("Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
+        cols = st.columns(3)
+        cols[0].metric("Нал", f"{totals.get('нал', 0):.0f}₽")
+        cols[1].metric("Карта", f"{totals.get('карта', 0):.0f}₽")
+        cols[2].metric("Чаевые", f"{totals.get('чаевые', 0):.0f}₽")
         
-        col4, col5, col6 = st.columns(3)
-        col4.metric("Изменение безнала", f"{totals.get('безнал_добавлено', 0):.0f} ₽")
-        col5.metric("Количество смен", f"{totals.get('смен', 0)}")
-        
-        total_income = totals.get('всего', 0)
-        col6.metric("Всего доход", f"{total_income:.0f} ₽")
-        
-        # Расходы на бензин и доп расходы
-        if not df_shifts.empty:
-            fuel_cost = float(
-                (df_shifts["Литры"].fillna(0) * df_shifts["Цена"].fillna(0)).sum()
-            )
-            profit = total_income - fuel_cost
-            
-            st.write("---")
-            st.subheader("💰 Финансовый результат")
-            
-            col7, col8, col9 = st.columns(3)
-            col7.metric("Доход", f"{total_income:.0f} ₽")
-            col8.metric("Бензин", f"{fuel_cost:.0f} ₽")
-            col9.metric("Прибыль", f"{profit:.0f} ₽")
-        
-    except ImportError as e:
-        st.error(f"❌ Ошибка загрузки модуля отчётов: {e}")
-        st.info("Убедитесь, что файл pages_imports.py существует в корневой папке")
-        
-        # Показываем отладочную информацию
-        with st.expander("🔧 Отладка"):
-            st.write("Текущая директория:", os.getcwd())
-            st.write("Файлы в директории:", os.listdir("."))
-            
     except Exception as e:
-        st.error(f"❌ Ошибка при формировании отчёта: {e}")
-        st.exception(e)
+        st.error(f"Ошибка: {e}")
 
 def show_admin_page():
     """Отображает страницу администрирования"""
-    # Проверяем и создаём таблицы
     if not check_and_create_tables():
-        st.error("❌ Ошибка при проверке таблиц базы данных")
+        st.error("❌ Ошибка БД")
         return
     
-    st.title(f"🛠 АДМИНИСТРИРОВАНИЕ — {st.session_state['username']}")
+    st.title(f"🛠 АДМИНКА")
     
-    # Проверка пароля администратора
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "changeme")
     
     if "admin_authenticated" not in st.session_state:
@@ -1649,7 +1606,7 @@ def show_admin_page():
     
     if not st.session_state.admin_authenticated:
         with st.form("admin_login"):
-            pwd = st.text_input("Пароль администратора", type="password")
+            pwd = st.text_input("Пароль", type="password")
             ok = st.form_submit_button("ВОЙТИ", width='stretch')
             
             if ok and pwd == ADMIN_PASSWORD:
@@ -1659,8 +1616,7 @@ def show_admin_page():
                 st.error("❌ Неверный пароль")
         return
     
-    # Создаём вкладки
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tabs = st.tabs([
         "📥 ИМПОРТ", 
         "🔄 ПЕРЕСЧЁТ", 
         "✏️ БЕЗНАЛ", 
@@ -1669,253 +1625,164 @@ def show_admin_page():
         "🔧 ИНСТРУМЕНТЫ"
     ])
     
-    with tab1:
-        st.header("📥 ИМПОРТ ДАННЫХ")
+    with tabs[0]:
+        st.subheader("📥 ИМПОРТ")
         
-        with st.expander("📄 Импорт из Google Sheets", expanded=False):
-            sheet_url = st.text_input("Ссылка на Google Sheets")
-            if st.button("🚀 ИМПОРТИРОВАТЬ", width='stretch'):
-                with st.spinner("Импортируем..."):
+        with st.expander("📄 Google Sheets"):
+            sheet_url = st.text_input("Ссылка")
+            if st.button("🚀 ИМПОРТ", width='stretch'):
+                with st.spinner("..."):
                     try:
-                        # Добавляем путь к текущей директории для импорта
                         import sys
                         sys.path.append(os.path.dirname(__file__))
-                        
                         from pages_imports import import_from_gsheet
                         imported = import_from_gsheet(sheet_url)
                         if imported > 0:
-                            st.success(f"✅ Импортировано {imported} заказов")
+                            st.success(f"✅ {imported} заказов")
                     except Exception as e:
                         st.error(f"Ошибка: {e}")
         
-        with st.expander("📂 Импорт из файла", expanded=True):
-            uploaded_file = st.file_uploader("Выберите файл", type=["xlsx", "xls", "csv"])
-            if uploaded_file and st.button("📤 ИМПОРТИРОВАТЬ", width='stretch'):
-                with st.spinner("Импортируем..."):
+        with st.expander("📂 Файл"):
+            uploaded = st.file_uploader("Выберите файл", type=["xlsx", "xls", "csv"])
+            if uploaded and st.button("📤 ИМПОРТ", width='stretch'):
+                with st.spinner("..."):
                     try:
-                        # Добавляем путь к текущей директории для импорта
                         import sys
                         sys.path.append(os.path.dirname(__file__))
-                        
                         from pages_imports import import_from_excel
-                        imported = import_from_excel(uploaded_file)
+                        imported = import_from_excel(uploaded)
                         if imported > 0:
-                            st.success(f"✅ Импортировано {imported} заказов")
+                            st.success(f"✅ {imported} заказов")
                     except Exception as e:
                         st.error(f"Ошибка: {e}")
     
-    with tab2:
-        st.header("🔄 ПЕРЕСЧЁТ ДАННЫХ")
+    with tabs[1]:
+        st.subheader("🔄 ПЕРЕСЧЁТ")
         try:
-            # Добавляем путь к текущей директории для импорта
             import sys
             sys.path.append(os.path.dirname(__file__))
-            
             from pages_imports import get_accumulated_beznal, recalc_full_db
             current = get_accumulated_beznal()
             st.metric("Текущий безнал", f"{current:.0f} ₽")
             
-            if st.button("🔄 ПЕРЕСЧИТАТЬ ВСЁ", width='stretch', type="primary"):
-                with st.spinner("Пересчитываем..."):
+            if st.button("🔄 ПЕРЕСЧИТАТЬ", width='stretch', type="primary"):
+                with st.spinner("..."):
                     new_total = recalc_full_db()
-                    st.success(f"✅ Пересчёт завершён. Новый безнал: {new_total:.0f} ₽")
+                    st.success(f"✅ Новый безнал: {new_total:.0f} ₽")
         except Exception as e:
             st.error(f"Ошибка: {e}")
     
-    with tab3:
-        st.header("✏️ ИЗМЕНЕНИЕ НАКОПЛЕННОГО БЕЗНАЛА")
-        
-        # Получаем текущее значение
+    with tabs[2]:
+        st.subheader("✏️ БЕЗНАЛ")
         current = get_accumulated_beznal()
+        st.metric("Текущее", f"{current:.0f} ₽")
         
-        # Показываем текущее значение
-        st.metric("Текущее значение", f"{current:.0f} ₽")
-        
-        # Создаём форму для изменения
         with st.form("change_beznal_form"):
-            st.markdown("---")
-            st.subheader("Установить новое значение")
-            
             new_value = st.number_input(
-                "Новое значение накопленного безнала, ₽",
+                "Новое значение",
                 min_value=None,
                 step=100.0,
                 format="%.0f",
                 value=float(current),
-                help="Введите новое значение (можно отрицательное)"
             )
             
-            col1, col2 = st.columns(2)
-            with col1:
+            cols = st.columns(2)
+            with cols[0]:
                 save_btn = st.form_submit_button("💾 СОХРАНИТЬ", use_container_width=True, type="primary")
-            with col2:
-                reset_btn = st.form_submit_button("🔄 СБРОСИТЬ", use_container_width=True)
+            with cols[1]:
+                reset_btn = st.form_submit_button("🔄 СБРОС", use_container_width=True)
         
         if save_btn:
             set_accumulated_beznal(new_value)
-            st.success(f"✅ Новое значение сохранено: {new_value:.0f} ₽")
-            log_action("Изменение безнала", f"Установлено значение {new_value:.0f} ₽")
+            st.success(f"✅ Сохранено: {new_value:.0f} ₽")
+            log_action("Изменение безнала", f"{new_value:.0f} ₽")
             st.rerun()
         
         if reset_btn:
-            # Сбрасываем на 0
             set_accumulated_beznal(0)
-            st.success(f"✅ Значение сброшено на 0 ₽")
-            log_action("Сброс безнала", "Установлено значение 0 ₽")
+            st.success(f"✅ Сброшено")
+            log_action("Сброс безнала", "0 ₽")
             st.rerun()
-        
-        st.divider()
-        
-        # Информация о безнале
-        st.info("""
-        **О накопленном безнале:**
-        - При заказах по карте сумма добавляется в безнал
-        - При заказах наличными комиссия списывается с безнала
-        - Вы можете вручную корректировать значение
-        - Отрицательные значения допустимы
-        """)
     
-    with tab4:
-        st.header("🗄 УПРАВЛЕНИЕ БЭКАПАМИ")
+    with tabs[3]:
+        st.subheader("🗄 БЭКАПЫ")
         
-        # Кнопка создания бэкапа
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📦 СОЗДАТЬ БЭКАП", width='stretch', type="primary"):
-                with st.spinner("Создаём бэкап..."):
-                    backup_path = create_backup()
-                    backup_size = os.path.getsize(backup_path) / 1024
-                    st.success(f"✅ Бэкап создан: {os.path.basename(backup_path)}")
-                    st.caption(f"📁 Папка: {os.path.dirname(backup_path)}")
-                    st.caption(f"📦 Размер: {backup_size:.1f} KB")
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button("📦 СОЗДАТЬ", width='stretch', type="primary"):
+                with st.spinner("..."):
+                    path = create_backup()
+                    size = os.path.getsize(path) / 1024
+                    st.success(f"✅ {os.path.basename(path)}")
+                    st.caption(f"📦 {size:.1f} KB")
         
-        with col2:
-            st.info(f"📁 Папка бэкапов: {os.path.basename(get_backup_dir())}")
+        with cols[1]:
+            st.info(f"📁 {os.path.basename(get_backup_dir())}")
         
-        # Список существующих бэкапов
-        st.subheader("📋 СУЩЕСТВУЮЩИЕ БЭКАПЫ")
         backups = list_backups()
-        
-        if not backups:
-            st.info("📭 Пока нет ни одного бэкапа")
-        else:
+        if backups:
+            st.subheader("📋 СПИСОК")
             for backup in backups:
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
-                    
-                    with col1:
-                        st.markdown(f"**{backup['name']}**")
-                        st.caption(f"🕒 {backup['time'].strftime('%d.%m.%Y %H:%M:%S')} | 📦 {backup['size']:.1f} KB")
-                    
-                    with col2:
-                        # Кнопка скачивания
-                        backup_data = download_backup(backup['path'])
-                        st.download_button(
-                            label="📥",
-                            data=backup_data,
-                            file_name=backup['name'],
-                            mime="application/octet-stream",
-                            help="Скачать бэкап на диск",
-                            key=f"download_{backup['name']}"
-                        )
-                    
-                    with col3:
-                        # Кнопка восстановления
-                        if st.button("🔄", key=f"restore_{backup['name']}", help="Восстановить из этого бэкапа"):
-                            try:
-                                restore_from_backup(backup['path'])
-                                st.success("✅ База восстановлена")
-                                st.cache_data.clear()
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Ошибка: {e}")
-                    
-                    with col4:
-                        # Кнопка удаления
-                        if st.button("🗑", key=f"delete_{backup['name']}", help="Удалить бэкап"):
-                            try:
-                                os.remove(backup['path'])
-                                st.success(f"✅ Бэкап удалён")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Ошибка: {e}")
-                    
-                    st.divider()
+                cols = st.columns([3, 1, 1, 1])
+                with cols[0]:
+                    st.markdown(f"**{backup['name'][:15]}...**")
+                    st.caption(f"🕒 {backup['time'].strftime('%d.%m.%Y %H:%M')}")
+                with cols[1]:
+                    data = download_backup(backup['path'])
+                    st.download_button("📥", data=data, file_name=backup['name'], key=f"d_{backup['name']}")
+                with cols[2]:
+                    if st.button("🔄", key=f"r_{backup['name']}"):
+                        restore_from_backup(backup['path'])
+                        st.success("✅ Восстановлено")
+                        st.cache_data.clear()
+                        st.rerun()
+                with cols[3]:
+                    if st.button("🗑", key=f"del_{backup['name']}"):
+                        os.remove(backup['path'])
+                        st.rerun()
+                st.divider()
     
-    with tab5:
-        st.header("💾 ЗАГРУЗКА БЭКАПА С ДИСКА")
+    with tabs[4]:
+        st.subheader("💾 ЗАГРУЗКА")
         
-        st.markdown("""
-        <div class="info-box">
-        Вы можете загрузить ранее сохранённый бэкап с диска и восстановить базу данных.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        uploaded_backup = st.file_uploader(
-            "Выберите файл бэкапа (.db)",
-            type=["db"],
-            help="Выберите файл бэкапа, который вы ранее скачали на диск"
-        )
-        
-        if uploaded_backup is not None:
-            file_size = len(uploaded_backup.getbuffer()) / 1024
-            st.caption(f"📦 Файл: {uploaded_backup.name} | Размер: {file_size:.1f} KB")
+        uploaded = st.file_uploader("Выберите .db файл", type=["db"])
+        if uploaded:
+            size = len(uploaded.getbuffer()) / 1024
+            st.caption(f"📦 {size:.1f} KB")
             
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ ВОССТАНОВИТЬ ИЗ ЭТОГО ФАЙЛА", width='stretch', type="primary"):
-                    with st.spinner("Восстанавливаем базу..."):
-                        try:
-                            # Создаём бэкап текущей базы
-                            create_backup()
-                            
-                            # Загружаем и восстанавливаем
-                            if upload_and_restore_backup(uploaded_backup):
-                                st.success("✅ База успешно восстановлена из загруженного файла")
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error("❌ Ошибка при восстановлении")
-                        except Exception as e:
-                            st.error(f"❌ Ошибка: {e}")
-            
-            with col2:
+            cols = st.columns(2)
+            with cols[0]:
+                if st.button("✅ ВОССТАНОВИТЬ", width='stretch', type="primary"):
+                    with st.spinner("..."):
+                        create_backup()
+                        if upload_and_restore_backup(uploaded):
+                            st.success("✅ Готово")
+                            st.cache_data.clear()
+                            st.rerun()
+            with cols[1]:
                 if st.button("❌ ОТМЕНА", width='stretch'):
                     st.rerun()
-        
-        st.divider()
-        
-        st.subheader("📋 ИНСТРУКЦИЯ")
-        st.markdown("""
-        1. **Скачивание бэкапа**: Нажмите кнопку 📥 рядом с нужным бэкапом во вкладке "БЭКАПЫ"
-        2. **Сохранение**: Файл сохранится на вашем компьютере
-        3. **Восстановление**: Выберите сохранённый файл выше и нажмите "ВОССТАНОВИТЬ"
-        
-        ⚠️ **Важно**: При восстановлении автоматически создаётся бэкап текущей базы
-        """)
     
-    with tab6:
-        st.header("🔧 ИНСТРУМЕНТЫ")
+    with tabs[5]:
+        st.subheader("🔧 ИНСТРУМЕНТЫ")
         try:
-            # Добавляем путь к текущей директории для импорта
             import sys
             sys.path.append(os.path.dirname(__file__))
-            
             from pages_imports import normalize_shift_dates, reset_db
-            if st.button("🛠 ИСПРАВИТЬ ФОРМАТ ДАТ", width='stretch'):
+            
+            if st.button("🛠 ИСПРАВИТЬ ДАТЫ", width='stretch'):
                 fixed, skipped = normalize_shift_dates()
-                st.success(f"✅ Исправлено дат: {fixed}, без изменений: {skipped}")
+                st.success(f"✅ Исправлено: {fixed}, без изменений: {skipped}")
             
             st.divider()
             
-            st.subheader("⚠️ ОПАСНАЯ ЗОНА")
-            st.error("🚨 Полный сброс базы удалит все данные!")
+            st.error("🚨 Полный сброс БД")
             
-            confirm = st.checkbox("Я понимаю, что все данные будут удалены")
+            confirm = st.checkbox("Я понимаю, что данные будут удалены")
             confirm2 = st.checkbox("Я сделал бэкап")
             
             if confirm and confirm2:
-                if st.button("🗑 УДАЛИТЬ БАЗУ", type="primary", width='stretch'):
+                if st.button("🗑 УДАЛИТЬ", type="primary", width='stretch'):
                     reset_db()
                     st.success("✅ База сброшена")
                     st.cache_data.clear()
@@ -1931,7 +1798,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-apply_custom_css()
+apply_mobile_optimized_css()
 init_auth_db()
 ensure_users_dir()
 
@@ -1942,72 +1809,69 @@ if saved_username and "username" not in st.session_state:
     st.session_state["db_name"] = get_current_db_name()
     st.session_state["user_dir"] = get_user_dir(saved_username)
     st.session_state["page"] = "main"
-    # Загружаем время сессии из файла
     try:
-        with open(SESSION_FILE, 'r', encoding='utf-8') as f:
-            session_data = json.load(f)
-            if session_data.get("session_start"):
-                st.session_state.session_start = datetime.fromisoformat(session_data["session_start"])
-                st.session_state.last_activity = datetime.fromisoformat(session_data["last_activity"])
+        with open(SESSION_FILE, 'r') as f:
+            data = json.load(f)
+            if data.get("session_start"):
+                st.session_state.session_start = datetime.fromisoformat(data["session_start"])
+                st.session_state.last_activity = datetime.fromisoformat(data["last_activity"])
     except:
         init_session()
 
-# Инициализируем сессию
 init_session()
 
 # ----- ЛОГИН / РЕГИСТРАЦИЯ -----
 if "username" not in st.session_state:
-    st.title("🚕 ТАКСИ УЧЁТ — ВХОД")
+    st.title("🚕 ВХОД")
 
-    tab_login, tab_reg = st.tabs(["ВХОД", "РЕГИСТРАЦИЯ"])
+    tabs = st.tabs(["ВХОД", "РЕГИСТРАЦИЯ"])
 
-    with tab_login:
+    with tabs[0]:
         with st.form("login_form"):
-            login_username = st.text_input("Имя пользователя")
-            login_password = st.text_input("Пароль", type="password")
-            login_btn = st.form_submit_button("ВОЙТИ", width='stretch')
+            username = st.text_input("Имя")
+            password = st.text_input("Пароль", type="password")
+            btn = st.form_submit_button("ВОЙТИ", width='stretch')
 
-        if login_btn:
-            if not login_username or not login_password:
-                st.error("Введите имя пользователя и пароль.")
-            elif authenticate_user(login_username, login_password):
-                update_login_stats(login_username.strip())
-                st.session_state["username"] = login_username.strip()
+        if btn:
+            if not username or not password:
+                st.error("Введите имя и пароль")
+            elif authenticate_user(username, password):
+                update_login_stats(username.strip())
+                st.session_state["username"] = username.strip()
                 st.session_state["db_name"] = get_current_db_name()
-                st.session_state["user_dir"] = get_user_dir(login_username.strip())
+                st.session_state["user_dir"] = get_user_dir(username.strip())
                 st.session_state["page"] = "main"
                 st.session_state["session_start"] = datetime.now(MOSCOW_TZ)
                 st.session_state["last_activity"] = datetime.now(MOSCOW_TZ)
-                # Сохраняем сессию на диск
                 save_session_to_disk()
-                st.success(f"✅ Добро пожаловать, {st.session_state['username']}!")
-                log_action("Вход в систему", f"Пользователь {st.session_state['username']}")
+                st.success(f"✅ Добро пожаловать!")
+                log_action("Вход", f"Пользователь {username}")
                 st.rerun()
             else:
-                st.error("❌ Неверное имя пользователя или пароль.")
+                st.error("❌ Неверное имя или пароль")
 
-    with tab_reg:
-        st.caption("Регистрация нового пользователя.")
+    with tabs[1]:
+        st.caption("Регистрация")
         with st.form("register_form"):
-            reg_username = st.text_input("Имя пользователя")
+            reg_username = st.text_input("Имя")
             reg_password = st.text_input("Пароль", type="password")
-            reg_password2 = st.text_input("Повтор пароля", type="password")
+            reg_password2 = st.text_input("Повтор", type="password")
             reg_btn = st.form_submit_button("ЗАРЕГИСТРИРОВАТЬСЯ", width='stretch')
 
         if reg_btn:
             if not reg_username or not reg_password:
-                st.error("Имя пользователя и пароль не могут быть пустыми.")
+                st.error("Имя и пароль не могут быть пустыми")
             elif reg_password != reg_password2:
-                st.error("Пароли не совпадают.")
+                st.error("Пароли не совпадают")
             elif len(reg_password) < 4:
-                st.error("Пароль должен быть не менее 4 символов.")
+                st.error("Пароль должен быть не менее 4 символов")
             else:
                 ok = register_user(reg_username, reg_password)
                 if ok:
-                    st.success("✅ Пользователь создан. Теперь можно войти.")
+                    st.success("✅ Пользователь создан")
                     log_action("Регистрация", f"Новый пользователь {reg_username}")
                 else:
-                    st.error("❌ Такой пользователь уже существует.")
+                    st.error("❌ Такой пользователь уже существует")
 
     st.stop()
 
@@ -2017,32 +1881,26 @@ st.session_state["db_name"] = get_current_db_name()
 if "page" not in st.session_state:
     st.session_state["page"] = "main"
 
-# Информация в сайдбаре с навигацией
+# Сайдбар
 with st.sidebar:
-    st.markdown(f"### 👤 {st.session_state['username']}")
-    st.markdown(f"📁 Папка: {os.path.basename(st.session_state.get('user_dir', 'unknown'))}")
-    st.markdown(f"📊 База: {os.path.basename(get_current_db_name())}")
+    st.markdown(f"**👤 {st.session_state['username']}**")
     
     try:
         db_path = get_current_db_name()
         if os.path.exists(db_path):
-            db_size = os.path.getsize(db_path) / 1024
-            st.caption(f"📦 Размер: {db_size:.1f} KB")
-            
-        # Показываем текущий безнал
-        acc = get_accumulated_beznal()
-        st.metric("💰 Накопленный безнал", f"{acc:.0f} ₽")
+            size = os.path.getsize(db_path) / 1024
+            st.caption(f"📦 {size:.1f} KB")
         
-        # Показываем количество бэкапов
+        acc = get_accumulated_beznal()
+        st.metric("💰 Безнал", f"{acc:.0f} ₽")
+        
         backups = list_backups()
-        st.caption(f"💾 Бэкапов: {len(backups)}")
+        st.caption(f"💾 {len(backups)} бэкапов")
     except:
         pass
     
-    st.markdown("---")
-    st.markdown("**НАВИГАЦИЯ:**")
+    st.divider()
     
-    # Кнопки навигации с русскими названиями
     if st.button("📋 ПРОГРАММА", width='stretch', 
                  type="primary" if st.session_state["page"] == "main" else "secondary"):
         st.session_state["page"] = "main"
@@ -2058,19 +1916,18 @@ with st.sidebar:
         st.session_state["page"] = "admin"
         st.rerun()
     
-    st.markdown("---")
+    st.divider()
     
-    # Информация о сессии
-    time_remaining = get_session_time_remaining()
-    st.markdown(f'<div class="session-timer">⏱️ Сессия активна ещё: {time_remaining}</div>', unsafe_allow_html=True)
+    time_left = get_session_time_remaining()
+    st.caption(f"⏱️ {time_left}")
     
     if st.button("🚪 ВЫЙТИ", width='stretch'):
         log_action("Выход", f"Пользователь {st.session_state['username']}")
-        clear_session_disk()  # Удаляем файл сессии
+        clear_session_disk()
         st.session_state.clear()
         st.rerun()
 
-# Отображаем выбранную страницу
+# Отображаем страницу
 if st.session_state["page"] == "main":
     show_main_page()
 elif st.session_state["page"] == "reports":
