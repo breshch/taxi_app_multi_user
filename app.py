@@ -6,17 +6,61 @@ import os
 import pandas as pd
 import shutil
 import io
+import json
+from pathlib import Path
 
 # ===== НАСТРОЙКИ =====
 AUTH_DB = "users.db"  # база с пользователями (логин/пароль)
 USERS_DIR = "users"    # папка для хранения данных пользователей
-SESSION_TIMEOUT = 5 * 60 * 60  # 5 часов в секундах
+SESSION_FILE = "session.json"  # файл для хранения сессии
+SESSION_TIMEOUT = 30 * 24 * 60 * 60  # 30 дней в секундах
 
 rate_nal = 0.78   # процент для нала (для расчёта комиссии)
 rate_card = 0.75  # процент для карты
 
 # Московский часовой пояс
 MOSCOW_TZ = timezone(timedelta(hours=3))
+
+# ===== УПРАВЛЕНИЕ СЕССИЕЙ НА ДИСКЕ =====
+def save_session_to_disk():
+    """Сохраняет данные сессии на диск"""
+    try:
+        if "username" in st.session_state and st.session_state["username"]:
+            session_data = {
+                "username": st.session_state["username"],
+                "session_start": st.session_state.session_start.isoformat() if "session_start" in st.session_state else None,
+                "last_activity": st.session_state.last_activity.isoformat() if "last_activity" in st.session_state else None
+            }
+            with open(SESSION_FILE, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f)
+    except Exception as e:
+        print(f"Ошибка при сохранении сессии: {e}")
+
+def load_session_from_disk():
+    """Загружает данные сессии с диска"""
+    try:
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+            
+            # Проверяем, не истекла ли сессия
+            if session_data.get("session_start"):
+                session_start = datetime.fromisoformat(session_data["session_start"])
+                time_elapsed = (datetime.now(MOSCOW_TZ) - session_start).total_seconds()
+                
+                if time_elapsed < SESSION_TIMEOUT:
+                    return session_data.get("username")
+    except Exception as e:
+        print(f"Ошибка при загрузке сессии: {e}")
+    return None
+
+def clear_session_disk():
+    """Удаляет файл сессии"""
+    try:
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
+    except Exception as e:
+        print(f"Ошибка при удалении сессии: {e}")
 
 # ===== КАСТОМНЫЙ ДИЗАЙН / CSS =====
 def apply_custom_css():
@@ -137,24 +181,6 @@ def apply_custom_css():
             border-color: #93c5fd;
             font-weight: 600;
         }
-        /* Стили для кнопки обновления */
-        .refresh-button {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 999;
-            background-color: #3b82f6;
-            color: white;
-            border-radius: 50px;
-            padding: 10px 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            border: none;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .refresh-button:hover {
-            background-color: #2563eb;
-        }
         /* Стили для загрузки файлов */
         .stFileUploader {
             border: 1px dashed #cbd5e1;
@@ -186,36 +212,40 @@ def init_session():
     if "session_start" not in st.session_state:
         st.session_state.session_start = datetime.now(MOSCOW_TZ)
         st.session_state.last_activity = datetime.now(MOSCOW_TZ)
+        # Сохраняем на диск при инициализации
+        save_session_to_disk()
     
     # Обновляем время последней активности
     st.session_state.last_activity = datetime.now(MOSCOW_TZ)
+    # Сохраняем на диск при активности
+    save_session_to_disk()
     
     # Проверяем, не истекла ли сессия
     time_elapsed = (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds()
     if time_elapsed > SESSION_TIMEOUT:
         # Сессия истекла, выходим
         st.session_state.clear()
+        clear_session_disk()
         st.warning("⏰ Сессия истекла. Пожалуйста, войдите снова.")
         st.rerun()
 
 def get_session_time_remaining() -> str:
-    """Возвращает оставшееся время сессии в формате ЧЧ:ММ:СС"""
+    """Возвращает оставшееся время сессии в формате Д:Ч:М:С"""
     if "session_start" not in st.session_state:
         return "00:00:00"
     
     time_elapsed = (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds()
     time_remaining = max(0, SESSION_TIMEOUT - time_elapsed)
     
-    hours = int(time_remaining // 3600)
+    days = int(time_remaining // (24 * 3600))
+    hours = int((time_remaining % (24 * 3600)) // 3600)
     minutes = int((time_remaining % 3600) // 60)
     seconds = int(time_remaining % 60)
     
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-# ===== ФУНКЦИЯ ОБНОВЛЕНИЯ СТРАНИЦЫ =====
-def refresh_page():
-    """Обновляет текущую страницу"""
-    st.rerun()
+    if days > 0:
+        return f"{days}д {hours:02d}:{minutes:02d}:{seconds:02d}"
+    else:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 # ===== РАБОТА С ПАПКАМИ ПОЛЬЗОВАТЕЛЕЙ =====
 def ensure_users_dir():
@@ -653,7 +683,7 @@ def get_shift_orders(shift_id):
         SELECT id, type, amount, tips, commission, total, beznal_added, order_time
         FROM orders
         WHERE shift_id = ?
-        ORDER BY id DESC  -- Изменено: теперь новые записи сверху
+        ORDER BY id DESC
         """,
         (shift_id,),
     )
@@ -1258,11 +1288,6 @@ def show_reports_page():
     
     st.title(f"📊 ОТЧЁТЫ — {st.session_state['username']}")
     
-    # Кнопка для принудительного обновления данных
-    if st.button("🔄 ОБНОВИТЬ ДАННЫЕ", width='stretch'):
-        st.cache_data.clear()
-        st.rerun()
-    
     # Импортируем функции из pages_imports.py
     try:
         # Добавляем путь к текущей директории для импорта
@@ -1708,8 +1733,25 @@ st.set_page_config(
 )
 
 apply_custom_css()
-init_auth_db()  # Инициализируем БД пользователей с правильной структурой
+init_auth_db()
 ensure_users_dir()
+
+# Пытаемся загрузить сессию с диска
+saved_username = load_session_from_disk()
+if saved_username and "username" not in st.session_state:
+    st.session_state["username"] = saved_username
+    st.session_state["db_name"] = get_current_db_name()
+    st.session_state["user_dir"] = get_user_dir(saved_username)
+    st.session_state["page"] = "main"
+    # Загружаем время сессии из файла
+    try:
+        with open(SESSION_FILE, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+            if session_data.get("session_start"):
+                st.session_state.session_start = datetime.fromisoformat(session_data["session_start"])
+                st.session_state.last_activity = datetime.fromisoformat(session_data["last_activity"])
+    except:
+        init_session()
 
 # Инициализируем сессию
 init_session()
@@ -1737,6 +1779,8 @@ if "username" not in st.session_state:
                 st.session_state["page"] = "main"
                 st.session_state["session_start"] = datetime.now(MOSCOW_TZ)
                 st.session_state["last_activity"] = datetime.now(MOSCOW_TZ)
+                # Сохраняем сессию на диск
+                save_session_to_disk()
                 st.success(f"✅ Добро пожаловать, {st.session_state['username']}!")
                 log_action("Вход в систему", f"Пользователь {st.session_state['username']}")
                 st.rerun()
@@ -1817,16 +1861,13 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Кнопка обновления страницы
-    if st.button("🔄 ОБНОВИТЬ СТРАНИЦУ", width='stretch'):
-        refresh_page()
-    
     # Информация о сессии
     time_remaining = get_session_time_remaining()
-    st.markdown(f'<div class="session-timer">⏱️ Сессия: {time_remaining}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="session-timer">⏱️ Сессия активна ещё: {time_remaining}</div>', unsafe_allow_html=True)
     
     if st.button("🚪 ВЫЙТИ", width='stretch'):
         log_action("Выход", f"Пользователь {st.session_state['username']}")
+        clear_session_disk()  # Удаляем файл сессии
         st.session_state.clear()
         st.rerun()
 
