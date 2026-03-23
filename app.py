@@ -12,7 +12,7 @@ from pathlib import Path
 AUTH_DB = "users.db"
 USERS_DIR = "users"
 SESSION_FILE = "session.json"
-SESSION_TIMEOUT = 30 * 24 * 60 * 60  # 30 дней
+SESSION_TIMEOUT = 30 * 24 * 60 * 60
 rate_nal = 0.78
 rate_card = 0.75
 
@@ -87,16 +87,12 @@ def apply_mobile_optimized_css():
     st.markdown(
         """
     <style>
-    /* Скрываем стандартную навигацию */
     section[data-testid="stSidebarNav"] { display: none !important; }
     .st-emotion-cache-1gv3huu, .st-emotion-cache-1jzia57 { display: none !important; }
-    
-    /* Базовые отступы */
     * { box-sizing: border-box; }
     .main > div { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
     .block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; max-width: 100% !important; }
     
-    /* Карточка пользователя */
     .user-info {
         display: flex; align-items: center; gap: 15px;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -110,51 +106,49 @@ def apply_mobile_optimized_css():
     .user-name { font-size: 1.5rem; font-weight: bold; color: white; }
     .user-name small { font-size: 0.9rem; color: rgba(255,255,255,0.9); }
     
-    /* Заголовки */
     h1 { font-size: 1.4rem !important; margin: 0.5rem 0 !important; text-align: center; }
     h2 { font-size: 1.2rem !important; margin: 0.5rem 0 !important; }
     h3 { font-size: 1.1rem !important; margin: 0.3rem 0 !important; }
     
-    /* Метрики */
     .stMetric { padding: 0.3rem !important; margin: 0.1rem 0 !important; }
     .stMetric label { font-size: 0.75rem !important; }
     .stMetric [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
     
-    /* Кнопки (удобно для пальцев) */
     .stButton > button {
         padding: 0.6rem 1rem !important; font-size: 0.95rem !important;
         margin: 0.2rem 0 !important; min-height: 44px; width: 100%;
         touch-action: manipulation;
     }
     
-    /* Поля ввода */
     .stTextInput > div > div > input, .stNumberInput > div > div > input {
         padding: 0.5rem !important; font-size: 1rem !important; min-height: 44px;
     }
     .stSelectbox > div > div { min-height: 44px; font-size: 1rem !important; }
     
-    /* Экспандеры */
     .stExpander { margin: 0.3rem 0 !important; }
     .stExpander > details > summary { padding: 0.5rem !important; font-size: 1rem !important; }
     
-    /* Сайдбар */
     section[data-testid="stSidebar"] { width: 300px !important; }
     section[data-testid="stSidebar"] > div { padding: 0.5rem !important; }
     
-    /* Таблицы */
     .stDataFrame { font-size: 0.85rem !important; }
     .stDataFrame td, .stDataFrame th { padding: 0.3rem !important; }
     
-    /* Уведомления */
     .stAlert { padding: 0.5rem !important; margin: 0.3rem 0 !important; font-size: 0.9rem !important; }
     
-    /* Мобильные медиа-запросы */
     @media (max-width: 640px) {
         .row-widget.stHorizontal { flex-wrap: wrap !important; gap: 0.3rem !important; }
         .row-widget.stHorizontal > div { flex: 1 1 auto !important; min-width: 45% !important; }
         .user-name { font-size: 1.3rem !important; }
         .user-avatar { width: 50px; height: 50px; font-size: 2rem !important; }
         h1 { font-size: 1.3rem !important; }
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        body { background-color: #1a1a2e !important; color: #e0e0e0 !important; }
+        .user-info { background: linear-gradient(135deg, #4a4a6a 0%, #5a4a72 100%) !important; }
+        .sidebar-metric { background: #2a2a3e !important; color: #e0e0e0 !important; }
+        .stButton > button { background-color: #4a4a6a !important; color: white !important; }
     }
     </style>
     """,
@@ -299,9 +293,9 @@ def check_and_create_tables():
     except Exception as e:
         print(f"Ошибка при создании таблиц: {e}")
         return False
+    # ===== АВТОРИЗАЦИЯ =====
 
 
-# ===== АВТОРИЗАЦИЯ =====
 def get_auth_conn():
     return sqlite3.connect(AUTH_DB)
 
@@ -397,26 +391,6 @@ def update_login_stats(username: str):
     finally:
         conn.commit()
         conn.close()
-
-
-def get_all_users() -> list:
-    conn = get_auth_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            SELECT username, COALESCE(created_at, 'неизвестно') as created_at,
-            COALESCE(last_login, 'никогда') as last_login, COALESCE(total_logins, 0) as total_logins
-            FROM users ORDER BY username
-        """
-        )
-        rows = cur.fetchall()
-    except:
-        cur.execute("SELECT username, created_at FROM users ORDER BY username")
-        rows = [(row[0], row[1], "неизвестно", 0) for row in cur.fetchall()]
-    finally:
-        conn.close()
-    return rows
 
 
 # ===== БД СМЕН И ЗАКАЗОВ =====
@@ -571,36 +545,6 @@ def get_total_extra_expenses(shift_id: int) -> float:
     cursor = conn.cursor()
     cursor.execute(
         "SELECT SUM(amount) FROM extra_expenses WHERE shift_id = ?", (shift_id,)
-    )
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] or 0.0
-
-
-def get_all_extra_expenses_stats() -> dict:
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT description, SUM(amount), COUNT(*) FROM extra_expenses GROUP BY description ORDER BY SUM(amount) DESC"
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    stats = []
-    for row in rows:
-        stats.append({"description": row[0], "total": row[1] or 0, "count": row[2]})
-    return stats
-
-
-def get_month_extra_expenses(year_month: str) -> float:
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT SUM(e.amount) FROM extra_expenses e
-        JOIN shifts s ON e.shift_id = s.id
-        WHERE strftime('%Y-%m', s.date) = ?
-    """,
-        (year_month,),
     )
     row = cursor.fetchone()
     conn.close()
@@ -865,7 +809,6 @@ def show_main_page():
         if acc != 0:
             st.metric("💰 Безнал", f"{acc:.0f} ₽")
 
-        # ДОБАВЛЕНИЕ ЗАКАЗА
         with st.expander("➕ ЗАКАЗ", expanded=True):
             if "amount_counter" not in st.session_state:
                 st.session_state.amount_counter = 0
@@ -942,7 +885,6 @@ def show_main_page():
                 except Exception as e:
                     st.error(f"Ошибка: {e}")
 
-        # СПИСОК ЗАКАЗОВ
         orders = get_shift_orders(shift_id)
         totals = get_shift_totals(shift_id) if orders else {}
         nal = totals.get("нал", 0.0)
@@ -1001,7 +943,6 @@ def show_main_page():
                                 st.rerun()
                 st.divider()
 
-            # ИТОГИ
             st.subheader("💰 ИТОГИ")
             extra_expenses = get_extra_expenses(shift_id)
             total_extra = sum(e["amount"] for e in extra_expenses)
@@ -1019,7 +960,6 @@ def show_main_page():
                     delta=f"Чистые: {total_income - total_extra:.0f}₽",
                 )
 
-        # РЕДАКТИРОВАНИЕ
         if st.session_state.edit_order_id is not None:
             st.subheader("✏️ РЕДАКТИРОВАНИЕ")
             order_id = st.session_state.edit_order_id
@@ -1096,7 +1036,6 @@ def show_main_page():
                 st.session_state.edit_order_id = None
                 st.rerun()
 
-        # РАСХОДЫ
         st.write("---")
         with st.expander("💸 РАСХОДЫ", expanded=False):
             st.caption("Мойка, еда и т.д.")
@@ -1181,7 +1120,6 @@ def show_main_page():
                     st.divider()
                 st.markdown(f"**ИТОГО: {total_extra:.0f}₽**")
 
-        # ЗАКРЫТИЕ СМЕНЫ
         st.write("---")
         with st.expander("🔒 ЗАКРЫТЬ", expanded=False):
             last_consumption, last_price = get_last_fuel_params()
@@ -1412,7 +1350,14 @@ def show_admin_page():
                 st.error("❌ Неверный пароль")
         return
     tabs = st.tabs(
-        ["📥 ИМПОРТ", "🔄 ПЕРЕСЧЁТ", "✏️ БЕЗНАЛ", "🗄 БЭКАПЫ", "🔧 ИНСТРУМЕНТЫ"]
+        [
+            "📥 ИМПОРТ",
+            "🔄 ПЕРЕСЧЁТ",
+            "✏️ БЕЗНАЛ",
+            "🗄 БЭКАПЫ",
+            "💾 ЗАГРУЗКА",
+            "🔧 ИНСТРУМЕНТЫ",
+        ]
     )
     with tabs[0]:
         st.subheader("📥 ИМПОРТ ДАННЫХ")
@@ -1508,7 +1453,7 @@ def show_admin_page():
                     with cols[1]:
                         data = download_backup(backup["path"])
                         st.download_button(
-                            label="📥",
+                            label="📥 Скачать",
                             data=data,
                             file_name=backup["name"],
                             key=f"d_{backup['name']}",
@@ -1531,6 +1476,37 @@ def show_admin_page():
                             st.rerun()
                     st.divider()
     with tabs[4]:
+        st.subheader("💾 ЗАГРУЗКА БЭКАПА")
+        st.caption("Загрузите ранее сохранённый бэкап с компьютера")
+        uploaded = st.file_uploader("Выберите файл бэкапа (.db)", type=["db"])
+        if uploaded:
+            size = len(uploaded.getbuffer()) / 1024
+            st.info(f"📦 Выбран файл: **{uploaded.name}** | Размер: {size:.1f} KB")
+            st.warning(
+                "⚠️ Внимание! Текущая база будет перезаписана. Автоматически создаётся бэкап."
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(
+                    "✅ ВОССТАНОВИТЬ", use_container_width=True, type="primary"
+                ):
+                    with st.spinner("Восстанавливаем базу..."):
+                        try:
+                            create_backup()
+                            if upload_and_restore_backup(uploaded):
+                                st.success("✅ База восстановлена!")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ Ошибка восстановления")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка: {e}")
+            with col2:
+                if st.button("❌ ОТМЕНА", use_container_width=True):
+                    st.rerun()
+        else:
+            st.info("📭 Выберите файл .db для загрузки")
+    with tabs[5]:
         st.subheader("🔧 ИНСТРУМЕНТЫ")
         try:
             from pages_imports import normalize_shift_dates, reset_db
@@ -1593,7 +1569,6 @@ if saved_username and "username" not in st.session_state:
 
 init_session()
 
-# ===== ЛОГИН =====
 if "username" not in st.session_state:
     st.title("🚕 ВХОД")
     tabs = st.tabs(["🔑 ВХОД", "📝 РЕГИСТРАЦИЯ"])
@@ -1644,12 +1619,10 @@ if "username" not in st.session_state:
                     st.error("❌ Уже существует")
     st.stop()
 
-# ===== ПОСЛЕ ВХОДА =====
 st.session_state["db_name"] = get_current_db_name()
 if "page" not in st.session_state:
     st.session_state["page"] = "main"
 
-# САЙДБАР
 with st.sidebar:
     st.markdown(
         f"""
@@ -1716,7 +1689,6 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# СТРАНИЦЫ
 if st.session_state["page"] == "main":
     show_main_page()
 elif st.session_state["page"] == "reports":

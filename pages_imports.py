@@ -6,7 +6,6 @@ import os
 import shutil
 from typing import Optional
 
-
 # ===== ОБЩИЕ ФУНКЦИИ ДЛЯ РАБОТЫ С ПУТЯМИ =====
 def get_user_dir() -> str:
     username = st.session_state.get("username")
@@ -18,7 +17,6 @@ def get_user_dir() -> str:
         os.makedirs(user_dir)
     return user_dir
 
-
 def get_current_db_name() -> str:
     username = st.session_state.get("username")
     if not username:
@@ -27,7 +25,6 @@ def get_current_db_name() -> str:
     db_path = os.path.join("users", safe_name, f"taxi_{safe_name}.db")
     return db_path
 
-
 def get_backup_dir() -> str:
     user_dir = get_user_dir()
     backup_dir = os.path.join(user_dir, "backups")
@@ -35,23 +32,19 @@ def get_backup_dir() -> str:
         os.makedirs(backup_dir)
     return backup_dir
 
-
 def get_connection():
     return sqlite3.connect(get_current_db_name())
-
 
 # ===== КОНСТАНТЫ =====
 rate_nal = 0.78
 rate_card = 0.75
-
 
 # ===== ФУНКЦИИ ДЛЯ ОТЧЁТОВ =====
 @st.cache_data(ttl=300)
 def get_available_year_months_cached():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT DISTINCT strftime('%Y-%m', date)
         FROM shifts
         WHERE date IS NOT NULL
@@ -59,8 +52,7 @@ def get_available_year_months_cached():
         AND is_open = 0
         AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
         ORDER BY 1 DESC
-    """
-    )
+    """)
     rows = cur.fetchall()
     conn.close()
     res = []
@@ -72,44 +64,33 @@ def get_available_year_months_cached():
             res.append(s)
     return res
 
-
 @st.cache_data(ttl=300)
 def get_month_totals_cached(year_month: str):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT id FROM shifts
         WHERE date LIKE ?
         AND is_open = 0
         AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
-    """,
-        (f"{year_month}%",),
-    )
+    """, (f"{year_month}%",))
     shifts = cur.fetchall()
-
+    
     total_nal = 0.0
     total_card = 0.0
     total_tips = 0.0
     total_beznal_add = 0.0
 
     for (shift_id,) in shifts:
-        cur.execute(
-            "SELECT type, SUM(total - tips) FROM orders WHERE shift_id = ? GROUP BY type",
-            (shift_id,),
-        )
+        cur.execute("SELECT type, SUM(total - tips) FROM orders WHERE shift_id = ? GROUP BY type", (shift_id,))
         for typ, summ in cur.fetchall():
             summ = summ or 0.0
-            # ИСПРАВЛЕНО: убраны пробелы в сравнениях
             if typ == "нал":
                 total_nal += summ
             elif typ == "карта":
                 total_card += summ
 
-        cur.execute(
-            "SELECT SUM(tips), SUM(beznal_added) FROM orders WHERE shift_id = ?",
-            (shift_id,),
-        )
+        cur.execute("SELECT SUM(tips), SUM(beznal_added) FROM orders WHERE shift_id = ?", (shift_id,))
         tips_sum, beznal_sum = cur.fetchone()
         total_tips += tips_sum or 0.0
         total_beznal_add += beznal_sum or 0.0
@@ -124,41 +105,30 @@ def get_month_totals_cached(year_month: str):
         "смен": len(shifts),
     }
 
-
 @st.cache_data(ttl=300)
 def get_month_shifts_details_cached(year_month: str) -> pd.DataFrame:
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT id, date, km, fuel_liters, fuel_price
         FROM shifts
         WHERE date LIKE ?
         AND is_open = 0
         AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
         ORDER BY date
-    """,
-        (f"{year_month}%",),
-    )
+    """, (f"{year_month}%",))
     shifts = cur.fetchall()
     rows = []
-
+    
     for shift_id, date_str, km, fuel_liters, fuel_price in shifts:
-        cur.execute(
-            "SELECT type, SUM(total - tips) FROM orders WHERE shift_id = ? GROUP BY type",
-            (shift_id,),
-        )
+        cur.execute("SELECT type, SUM(total - tips) FROM orders WHERE shift_id = ? GROUP BY type", (shift_id,))
         by_type = {t: s for t, s in cur.fetchall()}
 
-        cur.execute(
-            "SELECT SUM(tips), SUM(beznal_added) FROM orders WHERE shift_id = ?",
-            (shift_id,),
-        )
+        cur.execute("SELECT SUM(tips), SUM(beznal_added) FROM orders WHERE shift_id = ?", (shift_id,))
         tips_sum, beznal_sum = cur.fetchone()
         tips_sum = tips_sum or 0.0
         beznal_sum = beznal_sum or 0.0
 
-        # ИСПРАВЛЕНО: убраны пробелы в ключах
         nal = by_type.get("нал", 0.0) or 0.0
         card = by_type.get("карта", 0.0) or 0.0
         total = nal + card + tips_sum
@@ -168,20 +138,18 @@ def get_month_shifts_details_cached(year_month: str) -> pd.DataFrame:
         except:
             display_date = date_str
 
-        rows.append(
-            {
-                "Дата": display_date,
-                "date_iso": date_str,
-                "Нал": nal,
-                "Карта": card,
-                "Чаевые": tips_sum,
-                "Δ безнал": beznal_sum,
-                "Км": km or 0,
-                "Литры": fuel_liters or 0.0,
-                "Цена": fuel_price or 0.0,
-                "Всего": total,
-            }
-        )
+        rows.append({
+            "Дата": display_date,
+            "date_iso": date_str,
+            "Нал": nal,
+            "Карта": card,
+            "Чаевые": tips_sum,
+            "Δ безнал": beznal_sum,
+            "Км": km or 0,
+            "Литры": fuel_liters or 0.0,
+            "Цена": fuel_price or 0.0,
+            "Всего": total,
+        })
 
     conn.close()
     df = pd.DataFrame(rows)
@@ -191,73 +159,56 @@ def get_month_shifts_details_cached(year_month: str) -> pd.DataFrame:
         df.index = list(range(1, len(df) + 1))
     return df
 
-
 def get_closed_shift_id_by_date(date_str: str):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "SELECT id FROM shifts WHERE date = ? AND is_open = 0 ORDER BY id LIMIT 1",
-        (date_str,),
-    )
+    cur.execute("SELECT id FROM shifts WHERE date = ? AND is_open = 0 ORDER BY id LIMIT 1", (date_str,))
     row = cur.fetchone()
     conn.close()
     return row[0] if row else None
-
 
 def get_shift_orders_df(shift_id: int | None) -> pd.DataFrame:
     if shift_id is None:
         return pd.DataFrame()
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT type, amount, tips, beznal_added, total, order_time
         FROM orders WHERE shift_id = ? ORDER BY id
-    """,
-        (shift_id,),
-    )
+    """, (shift_id,))
     rows = cur.fetchall()
     conn.close()
 
     data = []
     for typ, amount, tips, beznal_added, total, order_time in rows:
-        data.append(
-            {
-                "Время": order_time or " ",
-                # ИСПРАВЛЕНО: пробелы в строках
-                "Тип": "💵 Нал" if typ == "нал" else "💳 Карта",
-                "Сумма": amount or 0.0,
-                "Чаевые": tips or 0.0,
-                "Δ безнал": beznal_added or 0.0,
-                "Вам": total or 0.0,
-            }
-        )
+        data.append({
+            "Время": order_time or " ",
+            "Тип": "💵 Нал" if typ == "нал" else "💳 Карта",
+            "Сумма": amount or 0.0,
+            "Чаевые": tips or 0.0,
+            "Δ безнал": beznal_added or 0.0,
+            "Вам": total or 0.0,
+        })
 
     df = pd.DataFrame(data)
     if not df.empty:
         df.index = list(range(1, len(df) + 1))
     return df
 
-
 def get_orders_by_hour(date_str: str) -> pd.DataFrame:
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT o.order_time FROM orders o
         JOIN shifts s ON o.shift_id = s.id
         WHERE s.date = ? AND s.is_open = 0 AND o.order_time IS NOT NULL
-    """,
-        (date_str,),
-    )
+    """, (date_str,))
     rows = cur.fetchall()
     conn.close()
     times = [r[0] for r in rows]
-
+    
     if not times:
-        return pd.DataFrame(
-            {"Час": [f"{h:02d}:00" for h in range(24)], "Заказов": [0] * 24}
-        )
+        return pd.DataFrame({"Час": [f"{h:02d}:00" for h in range(24)], "Заказов": [0] * 24})
 
     hours = []
     for t in times:
@@ -269,9 +220,7 @@ def get_orders_by_hour(date_str: str) -> pd.DataFrame:
             continue
 
     if not hours:
-        return pd.DataFrame(
-            {"Час": [f"{h:02d}:00" for h in range(24)], "Заказов": [0] * 24}
-        )
+        return pd.DataFrame({"Час": [f"{h:02d}:00" for h in range(24)], "Заказов": [0] * 24})
 
     s = pd.Series(hours)
     counts = s.value_counts().sort_index()
@@ -282,21 +231,11 @@ def get_orders_by_hour(date_str: str) -> pd.DataFrame:
     df["Час"] = df["Час"].apply(lambda h: f"{h:02d}:00")
     return df
 
-
 def format_month_option(s) -> str:
     month_name = {
-        1: "январь",
-        2: "февраль",
-        3: "март",
-        4: "апрель",
-        5: "май",
-        6: "июнь",
-        7: "июль",
-        8: "август",
-        9: "сентябрь",
-        10: "октябрь",
-        11: "ноябрь",
-        12: "декабрь",
+        1: "январь", 2: "февраль", 3: "март", 4: "апрель",
+        5: "май", 6: "июнь", 7: "июль", 8: "август",
+        9: "сентябрь", 10: "октябрь", 11: "ноябрь", 12: "декабрь",
     }
     if s is None:
         return "—"
@@ -308,7 +247,6 @@ def format_month_option(s) -> str:
             return f"{s_str} ({month_name.get(m, '')})"
     return s_str or "—"
 
-
 # ===== ФУНКЦИИ ДЛЯ АДМИНИСТРИРОВАНИЯ =====
 def get_accumulated_beznal():
     conn = get_connection()
@@ -317,7 +255,6 @@ def get_accumulated_beznal():
     row = cur.fetchone()
     conn.close()
     return float(row[0]) if row and row[0] is not None else 0.0
-
 
 def recalc_full_db():
     conn = get_connection()
@@ -339,14 +276,9 @@ def recalc_full_db():
             total = final_wo_tips + tips_f
             beznal_added = final_wo_tips
 
-        cur.execute(
-            """
-            UPDATE orders
-            SET commission = ?, total = ?, beznal_added = ?
-            WHERE id = ?
-        """,
-            (commission, total, beznal_added, order_id),
-        )
+        cur.execute("""
+            UPDATE orders SET commission = ?, total = ?, beznal_added = ? WHERE id = ?
+        """, (commission, total, beznal_added, order_id))
 
     cur.execute("SELECT COALESCE(SUM(beznal_added), 0) FROM orders")
     total_beznal = cur.fetchone()[0] or 0.0
@@ -356,27 +288,19 @@ def recalc_full_db():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if row:
-        cur.execute(
-            "UPDATE accumulated_beznal SET total_amount = ?, last_updated = ? WHERE driver_id = 1",
-            (total_beznal, now),
-        )
+        cur.execute("UPDATE accumulated_beznal SET total_amount = ?, last_updated = ? WHERE driver_id = 1", (total_beznal, now))
     else:
-        cur.execute(
-            "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, ?, ?)",
-            (total_beznal, now),
-        )
+        cur.execute("INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, ?, ?)", (total_beznal, now))
 
     conn.commit()
     conn.close()
     return total_beznal
-
 
 def safe_str_cell(v, default=""):
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return default
     s = str(v).strip()
     return s if s != "" else default
-
 
 def safe_num_cell(v, default=0.0):
     if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -389,13 +313,12 @@ def safe_num_cell(v, default=0.0):
     except ValueError:
         return default
 
-
 def parse_date_to_iso(v) -> Optional[str]:
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return None
     from datetime import date as _date, datetime as _dt
 
-    if hasattr(v, "strftime"):
+    if hasattr(v, 'strftime'):
         try:
             return v.strftime("%Y-%m-%d")
         except:
@@ -422,14 +345,13 @@ def parse_date_to_iso(v) -> Optional[str]:
         return None
     return dt.date().strftime("%Y-%m-%d")
 
-
 def import_from_excel(uploaded_file) -> int:
     try:
         if uploaded_file.name.lower().endswith(".csv"):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
-
+        
         df.columns = [str(c).strip() for c in df.columns]
 
         if "Сумма" not in df.columns:
@@ -466,10 +388,8 @@ def import_from_excel(uploaded_file) -> int:
                 if s:
                     shift_id = s[0]
                 else:
-                    cur.execute(
-                        "INSERT INTO shifts (date, is_open, opened_at, closed_at) VALUES (?, 0, ?, ?)",
-                        (iso_date, iso_date, iso_date),
-                    )
+                    cur.execute("INSERT INTO shifts (date, is_open, opened_at, closed_at) VALUES (?, 0, ?, ?)",
+                                (iso_date, iso_date, iso_date))
                     shift_id = cur.lastrowid
 
                 raw_type = row.get("Тип", "нал")
@@ -488,28 +408,13 @@ def import_from_excel(uploaded_file) -> int:
                     total = final_wo_tips + tips_f
                     beznal_added = final_wo_tips
 
-                cur.execute(
-                    """
+                cur.execute("""
                     INSERT INTO orders (shift_id, type, amount, tips, commission, total, beznal_added, order_time)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        shift_id,
-                        typ,
-                        amount_f,
-                        tips_f,
-                        commission,
-                        total,
-                        beznal_added,
-                        None,
-                    ),
-                )
+                """, (shift_id, typ, amount_f, tips_f, commission, total, beznal_added, None))
 
                 if beznal_added != 0:
-                    cur.execute(
-                        "UPDATE accumulated_beznal SET total_amount = total_amount + ? WHERE driver_id = 1",
-                        (beznal_added,),
-                    )
+                    cur.execute("UPDATE accumulated_beznal SET total_amount = total_amount + ? WHERE driver_id = 1", (beznal_added,))
 
                 imported += 1
             except Exception as e:
@@ -522,7 +427,6 @@ def import_from_excel(uploaded_file) -> int:
     except Exception as e:
         st.error(f"❌ Ошибка чтения файла: {e}")
         return 0
-
 
 def import_from_gsheet(sheet_url: str) -> int:
     try:
@@ -537,7 +441,6 @@ def import_from_gsheet(sheet_url: str) -> int:
         st.error(f"❌ Ошибка: {e}")
         return 0
 
-
 def create_backup() -> str:
     backup_dir = get_backup_dir()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -547,14 +450,11 @@ def create_backup() -> str:
     shutil.copy2(get_current_db_name(), backup_path)
     return backup_path
 
-
 def list_backups() -> list[tuple[str, str]]:
     backup_dir = get_backup_dir()
     if not os.path.isdir(backup_dir):
         return []
-    files = [
-        os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".db")
-    ]
+    files = [os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".db")]
     files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     result = []
     for path in files:
@@ -563,18 +463,15 @@ def list_backups() -> list[tuple[str, str]]:
         result.append((label, path))
     return result
 
-
 def restore_backup(path: str):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Файл бэкапа не найден: {path}")
     shutil.copy2(path, get_current_db_name())
 
-
 def reset_db():
     db_path = get_current_db_name()
     if os.path.exists(db_path):
         os.remove(db_path)
-
 
 def normalize_shift_dates():
     conn = get_connection()
