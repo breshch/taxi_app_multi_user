@@ -1,0 +1,7 @@
+token.json
+credentials.json
+*.db
+session.json
+users/
+__pycache__/
+*.log
