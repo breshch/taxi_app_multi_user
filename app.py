@@ -28,7 +28,7 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 def apply_mobile_optimized_css():
     st.markdown("""
     <style>
-    section[data-testid="stSidebarNav"] { display: none !important; }
+    /* section[data-testid="stSidebarNav"] { display: none !important; } */
     * { box-sizing: border-box; }
     .main > div { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
     .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; max-width: 100% !important; }
@@ -446,7 +446,11 @@ def sync_with_google_drive():
             st.rerun()
 
         service = build('drive', 'v3', credentials=creds)
-        results = service.files().list(q=f"name='{BACKUP_FILENAME}' and trashed=false", spaces='drive', fields='files(id, modifiedTime)').execute()
+        results = service.files().list(
+            q=f"name='{BACKUP_FILENAME}' and trashed=false",
+            spaces='drive',
+            fields='files(id, modifiedTime)'
+        ).execute()
         files = results.get('files', [])
         
         local_path = get_current_db_name()
