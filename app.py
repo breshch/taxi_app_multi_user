@@ -800,6 +800,7 @@ def show_main_page():
                 st.success("✅ Смена закрыта")
                 st.cache_data.clear()
                 st.rerun()
+                """"""
 
 
 def show_reports_page():
