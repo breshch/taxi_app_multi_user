@@ -24,6 +24,55 @@ POPULAR_EXPENSES = [
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
+# ===== CSS (СКРЫТИЕ ПАНЕЛИ) =====
+def apply_mobile_optimized_css():
+    st.markdown("""
+    <style>
+    /* ГЛАВНОЕ: СКРЫВАЕМ ЛЕВУЮ ПАНЕЛЬ НАВИГАЦИИ */
+    section[data-testid="stSidebarNav"] { display: none !important; }
+    header { visibility: hidden; }
+    
+    /* Общие стили */
+    * { box-sizing: border-box; }
+    .main > div { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; max-width: 100% !important; }
+    
+    /* Карточка пользователя */
+    .user-info {
+        display: flex; align-items: center; gap: 15px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 15px; border-radius: 15px; margin-bottom: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+    .user-avatar {
+        font-size: 2.5rem; background: white; width: 60px; height: 60px;
+        border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    }
+    .user-name { font-size: 1.5rem; font-weight: bold; color: white; }
+    .user-name small { font-size: 0.9rem; color: rgba(255,255,255,0.9); }
+    
+    /* Кнопки с подписями */
+    .stButton > button {
+        padding: 0.6rem 1rem !important; font-size: 0.9rem !important;
+        margin: 0.2rem 0 !important; min-height: 44px; width: 100%;
+        white-space: normal !important;
+        line-height: 1.2 !important;
+    }
+    
+    /* Поля ввода */
+    .stTextInput > div > div > input, .stNumberInput > div > div > input {
+        padding: 0.5rem !important; font-size: 1rem !important; min-height: 44px;
+    }
+    
+    /* Тёмная тема */
+    @media (prefers-color-scheme: dark) {
+        body { background-color: #1a1a2e !important; color: #e0e0e0 !important; }
+        .user-info { background: linear-gradient(135deg, #4a4a6a 0%, #5a4a72 100%) !important; }
+        .stButton > button { background-color: #4a4a6a !important; color: white !important; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # ===== УПРАВЛЕНИЕ СЕССИЕЙ =====
 def save_session_to_disk():
     try:
@@ -46,11 +95,8 @@ def load_session_from_disk():
             if session_data.get("session_start"):
                 session_start_str = session_data["session_start"]
                 session_start = datetime.fromisoformat(session_start_str)
-                
-                # ИСПРАВЛЕНИЕ: Добавляем часовой пояс, если его нет
                 if session_start.tzinfo is None:
                     session_start = session_start.replace(tzinfo=MOSCOW_TZ)
-                
                 time_elapsed = (datetime.now(MOSCOW_TZ) - session_start).total_seconds()
                 if time_elapsed < SESSION_TIMEOUT:
                     return session_data.get("username")
@@ -62,83 +108,13 @@ def clear_session_disk():
     if os.path.exists(SESSION_FILE):
         os.remove(SESSION_FILE)
 
-# ===== CSS =====
-def apply_mobile_optimized_css():
-    st.markdown("""
-    <style>
-    section[data-testid="stSidebarNav"] { display: none !important; }
-    .main > div { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; max-width: 100% !important; }
-    
-    .user-info {
-        display: flex; align-items: center; gap: 15px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 15px; border-radius: 15px; margin-bottom: 15px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-    }
-    .user-avatar {
-        font-size: 2.5rem; background: white; width: 60px; height: 60px;
-        border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    }
-    .user-name { font-size: 1.5rem; font-weight: bold; color: white; }
-    .user-name small { font-size: 0.9rem; color: rgba(255,255,255,0.9); }
-    
-    h1 { font-size: 1.4rem !important; margin: 0.5rem 0 !important; text-align: center; }
-    h2 { font-size: 1.2rem !important; margin: 0.5rem 0 !important; }
-    h3 { font-size: 1.1rem !important; margin: 0.3rem 0 !important; }
-    
-    .stMetric { padding: 0.3rem !important; margin: 0.1rem 0 !important; }
-    .stMetric label { font-size: 0.75rem !important; }
-    .stMetric [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
-    
-    .stButton > button {
-        padding: 0.6rem 1rem !important; font-size: 0.95rem !important;
-        margin: 0.2rem 0 !important; min-height: 44px; width: 100%;
-        touch-action: manipulation;
-    }
-    
-    .stTextInput > div > div > input, .stNumberInput > div > div > input {
-        padding: 0.5rem !important; font-size: 1rem !important; min-height: 44px;
-    }
-    .stSelectbox > div > div { min-height: 44px; font-size: 1rem !important; }
-    
-    .stExpander { margin: 0.3rem 0 !important; }
-    .stExpander > details > summary { padding: 0.5rem !important; font-size: 1rem !important; }
-    
-    section[data-testid="stSidebar"] { width: 300px !important; }
-    section[data-testid="stSidebar"] > div { padding: 0.5rem !important; }
-    
-    .stDataFrame { font-size: 0.85rem !important; }
-    .stDataFrame td, .stDataFrame th { padding: 0.3rem !important; }
-    
-    .stAlert { padding: 0.5rem !important; margin: 0.3rem 0 !important; font-size: 0.9rem !important; }
-    
-    @media (max-width: 640px) {
-        .row-widget.stHorizontal { flex-wrap: wrap !important; gap: 0.3rem !important; }
-        .row-widget.stHorizontal > div { flex: 1 1 auto !important; min-width: 45% !important; }
-        .user-name { font-size: 1.3rem !important; }
-        .user-avatar { width: 50px; height: 50px; font-size: 2rem !important; }
-        h1 { font-size: 1.3rem !important; }
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        body { background-color: #1a1a2e !important; color: #e0e0e0 !important; }
-        .user-info { background: linear-gradient(135deg, #4a4a6a 0%, #5a4a72 100%) !important; }
-        .sidebar-metric { background: #2a2a3e !important; color: #e0e0e0 !important; }
-        .stButton > button { background-color: #4a4a6a !important; color: white !important; }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 def init_session():
     if "session_start" not in st.session_state:
         st.session_state.session_start = datetime.now(MOSCOW_TZ)
         st.session_state.last_activity = datetime.now(MOSCOW_TZ)
         save_session_to_disk()
-    
     st.session_state.last_activity = datetime.now(MOSCOW_TZ)
     save_session_to_disk()
-    
     time_elapsed = (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds()
     if time_elapsed > SESSION_TIMEOUT:
         st.session_state.clear()
@@ -244,7 +220,7 @@ def authenticate_user(username: str, password: str) -> bool:
     conn.close()
     return row and row[0] == hash_password(password)
 
-# ===== ФУНКЦИИ БД =====
+# ===== БД ФУНКЦИИ =====
 def get_open_shift():
     conn = sqlite3.connect(get_current_db_name())
     c = conn.cursor()
@@ -367,7 +343,6 @@ def upload_and_restore_backup(uploaded_file):
 
 # ===== GOOGLE DRIVE СИНХРОНИЗАЦИЯ =====
 def sync_with_google_drive():
-    """Синхронизация с Google Drive"""
     try:
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -389,7 +364,6 @@ def sync_with_google_drive():
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                # Используем run_local_server для Web Application типа
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0, open_browser=True)
             
@@ -412,7 +386,6 @@ def sync_with_google_drive():
             return True
         else:
             cloud_mtime = datetime.fromisoformat(files[0]['modifiedTime'].replace('Z', '+00:00'))
-            # Делаем local_mtime aware для сравнения
             local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
             
             if local_mtime_aware > cloud_mtime:
@@ -447,7 +420,7 @@ def show_main_page():
         st.info("📭 Нет открытой смены")
         with st.expander("📝 ОТКРЫТЬ СМЕНУ", expanded=True):
             d = st.date_input("Дата", value=date.today())
-            if st.button("📂 ОТКРЫТЬ", use_container_width=True):
+            if st.button("📂 Открыть новую смену", use_container_width=True, help="Начать рабочую смену сегодня"):
                 open_shift(d.strftime("%Y-%m-%d"))
                 st.rerun()
     else:
@@ -457,12 +430,12 @@ def show_main_page():
         if acc != 0:
             st.metric("💰 Безнал", f"{acc:.0f} ₽")
 
-        with st.expander("➕ ЗАКАЗ", expanded=True):
+        with st.expander("➕ ДОБАВИТЬ ЗАКАЗ", expanded=True):
             c1, c2 = st.columns(2)
-            amt = c1.text_input("Сумма", placeholder="650")
-            typ = c2.selectbox("Тип", ["НАЛ", "КАРТА"])
-            tips = st.text_input("Чаевые", placeholder="0")
-            if st.button("💾 СОХРАНИТЬ", use_container_width=True):
+            amt = c1.text_input("Сумма заказа", placeholder="650", help="Сумма без учёта чаевых")
+            typ = c2.selectbox("Тип оплаты", ["НАЛ", "КАРТА"], help="Как оплатил клиент")
+            tips = st.text_input("Чаевые", placeholder="0", help="Сумма чаевых")
+            if st.button("💾 Сохранить заказ", use_container_width=True, help="Добавить заказ в текущую смену"):
                 if amt:
                     a = float(amt.replace(",", "."))
                     t = float(tips.replace(",", ".")) if tips else 0.0
@@ -477,20 +450,20 @@ def show_main_page():
 
         orders = get_shift_orders(sid)
         if orders:
-            st.subheader("📋 ЗАКАЗЫ")
+            st.subheader("📋 Список заказов")
             totals = get_shift_totals(sid)
             for i, (_, tp, am, ti, _, tot, _, tm) in enumerate(orders, 1):
                 cols = st.columns([2, 1, 1])
                 cols[0].markdown(f"**#{i}** {tm or ''} {'💵' if tp=='нал' else '💳'} {am:.0f}₽")
                 cols[1].markdown(f"**{tot:.0f}**")
-                if cols[2].button("🗑", key=f"d{i}"):
+                if cols[2].button("🗑 Удалить заказ", key=f"d{i}", help="Удалить этот заказ из списка"):
                     st.success("Удалено"); st.rerun()
             st.divider()
             st.metric("ДОХОД", f"{totals.get('нал',0)+totals.get('карта',0)+totals.get('чаевые',0):.0f}₽")
 
         with st.expander("🔒 ЗАКРЫТЬ СМЕНУ"):
-            km = st.number_input("Км", value=100)
-            if st.button("🔒 ЗАКРЫТЬ", use_container_width=True, type="primary"):
+            km = st.number_input("Пробег (км)", value=100)
+            if st.button("🔒 Закрыть смену и сохранить итог", use_container_width=True, type="primary", help="Завершить смену, записать пробег"):
                 close_shift_db(sid, km, 0, 0)
                 st.success("Смена закрыта")
                 st.rerun()
@@ -503,7 +476,7 @@ def show_reports_page():
         if not year_months:
             st.info("📭 Нет закрытых смен"); return
         
-        ym = st.selectbox("📅 Месяц", year_months, format_func=format_month_option, index=0)
+        ym = st.selectbox("📅 Выберите месяц", year_months, format_func=format_month_option, index=0)
         totals = get_month_totals_cached(ym)
         col1, col2, col3 = st.columns(3)
         col1.metric("💵 Нал", f"{totals.get('нал', 0):.0f} ₽")
@@ -515,15 +488,14 @@ def show_reports_page():
 def show_admin_page():
     st.title("🛠 АДМИНКА")
     pwd = st.text_input("Пароль админа", type="password")
-    if st.button("ВОЙТИ"):
+    if st.button("🔓 Войти в админку", use_container_width=True, help="Ввести пароль для доступа к настройкам"):
         if pwd == st.secrets.get("ADMIN_PASSWORD", "changeme"):
             st.session_state.admin_auth = True
             st.rerun()
         else:
-            st.error("Неверно")
+            st.error("Неверный пароль")
     
     if st.session_state.get("admin_auth"):
-        # 7 ВКЛАДОК
         tabs = st.tabs(["📥 ИМПОРТ", "🔄 ПЕРЕСЧЁТ", "✏️ БЕЗНАЛ", "🗄 БЭКАПЫ", "💾 ЗАГРУЗКА", "☁️ GOOGLE DRIVE", "🔧 ИНСТРУМЕНТЫ"])
         
         with tabs[0]:
@@ -531,53 +503,53 @@ def show_admin_page():
         
         with tabs[1]:
             from pages_imports import recalc_full_db, get_accumulated_beznal
-            if st.button("Пересчитать всё"):
+            if st.button("🔄 Пересчитать все комиссии и безнал", help="Обновить данные во всей базе"):
                 new_total = recalc_full_db()
                 st.success(f"Готово. Новый безнал: {new_total:.0f} ₽")
         
         with tabs[2]:
             curr = get_accumulated_beznal()
-            new_val = st.number_input("Новое значение", value=float(curr))
-            if st.button("Сохранить"):
+            new_val = st.number_input("Новое значение безнала", value=float(curr))
+            if st.button("💾 Сохранить изменение", help="Установить новое значение вручную"):
                 set_accumulated_beznal(new_val)
                 st.success("Сохранено"); st.rerun()
         
         with tabs[3]:
-            if st.button("Создать бэкап"):
+            if st.button("📦 Создать новый бэкап сейчас", help="Сохранить копию базы данных"):
                 path = create_backup()
                 st.success(f"Создан: {os.path.basename(path)}")
             backups = list_backups()
             for b in backups:
                 cols = st.columns([3, 1, 1, 1])
                 cols[0].write(f"{b['name']}")
-                if cols[1].button("📥", key=f"d{b['name']}"):
+                if cols[1].button("📥 Скачать файл", key=f"d{b['name']}", help="Сохранить бэкап на компьютер"):
                     st.download_button("Скачать", download_backup(b['path']), b['name'])
-                if cols[2].button("🔄", key=f"r{b['name']}"):
+                if cols[2].button("🔄 Восстановить из этого", key=f"r{b['name']}", help="Заменить текущую базу этим бэкапом"):
                     restore_from_backup(b['path']); st.success("Восстановлено"); st.rerun()
-                if cols[3].button("🗑", key=f"x{b['name']}"):
+                if cols[3].button("🗑 Удалить файл", key=f"x{b['name']}", help="Удалить этот бэкап навсегда"):
                     os.remove(b['path']); st.success("Удалено"); st.rerun()
 
         with tabs[4]:
             uploaded = st.file_uploader("Загрузить бэкап (.db)", type=["db"])
-            if uploaded and st.button("Восстановить"):
+            if uploaded and st.button("✅ Восстановить из выбранного файла", help="Загрузить базу из файла с компьютера"):
                 if upload_and_restore_backup(uploaded):
                     st.success("Восстановлено!"); st.cache_data.clear(); st.rerun()
 
         with tabs[5]:
             st.subheader("☁️ Google Drive Синхронизация")
             st.info("Нажмите кнопку ниже. Откроется окно браузера для входа в Google. После входа вернитесь сюда.")
-            if st.button("🔄 НАЧАТЬ СИНХРОНИЗАЦИЮ", type="primary", use_container_width=True):
+            if st.button("🔄 Начать синхронизацию с облаком", type="primary", use_container_width=True, help="Синхронизировать базу с Google Диском"):
                 sync_with_google_drive()
         
         with tabs[6]:
-            if st.button("🗑 УДАЛИТЬ ВСЕ ДАННЫЕ"):
+            if st.button("🗑 Удалить ВСЕ данные пользователя", help="Полностью очистить базу (необратимо!)"):
                 from pages_imports import reset_db
                 reset_db()
                 st.success("Сброшено"); st.rerun()
 
 # ===== ЗАПУСК =====
-st.set_page_config(page_title="Такси учёт", page_icon="🚕", layout="centered")
-apply_mobile_optimized_css()
+st.set_page_config(page_title="Такси учёт", page_icon="🚕", layout="centered", initial_sidebar_state="expanded")
+apply_mobile_optimized_css() # Вызываем CSS сразу после настройки страницы
 init_auth_db()
 ensure_users_dir()
 init_session()
@@ -591,14 +563,14 @@ if "username" not in st.session_state:
     st.title("🚕 ВХОД")
     u = st.text_input("Логин")
     p = st.text_input("Пароль", type="password")
-    if st.button("ВОЙТИ", use_container_width=True):
+    if st.button("🔓 Войти в систему", use_container_width=True, help="Авторизоваться"):
         if authenticate_user(u, p):
             st.session_state.username = u.strip()
             st.session_state.page = "main"
             st.rerun()
         else:
             st.error("Ошибка")
-    if st.button("РЕГИСТРАЦИЯ", use_container_width=True):
+    if st.button("📝 Зарегистрироваться", use_container_width=True, help="Создать нового пользователя"):
         if register_user(u, p):
             st.success("Создан! Войдите.")
         else:
@@ -607,12 +579,16 @@ if "username" not in st.session_state:
 
 with st.sidebar:
     st.markdown(f"<div class='user-info'><div class='user-avatar'>👤</div><div class='user-name'>{st.session_state['username']}<small>водитель</small></div></div>", unsafe_allow_html=True)
-    if st.button("📋 ГЛАВНАЯ", use_container_width=True, type="primary" if st.session_state.get("page")=="main" else "secondary"): st.session_state.page="main"; st.rerun()
-    if st.button("📊 ОТЧЁТЫ", use_container_width=True, type="primary" if st.session_state.get("page")=="reports" else "secondary"): st.session_state.page="reports"; st.rerun()
-    if st.button("⚙️ АДМИНКА", use_container_width=True, type="primary" if st.session_state.get("page")=="admin" else "secondary"): st.session_state.page="admin"; st.rerun()
+    if st.button("📋 Главная (Программа)", use_container_width=True, type="primary" if st.session_state.get("page")=="main" else "secondary", help="Перейти к учёту заказов"):
+        st.session_state.page="main"; st.rerun()
+    if st.button("📊 Отчёты и статистика", use_container_width=True, type="primary" if st.session_state.get("page")=="reports" else "secondary", help="Просмотреть доходы и расходы"):
+        st.session_state.page="reports"; st.rerun()
+    if st.button("⚙️ Админка и настройки", use_container_width=True, type="primary" if st.session_state.get("page")=="admin" else "secondary", help="Бэкапы, синхронизация, импорт"):
+        st.session_state.page="admin"; st.rerun()
     st.divider()
     st.caption(f"⏱️ Сессия: {get_session_time_remaining()}")
-    if st.button("🚪 ВЫЙТИ", use_container_width=True): clear_session_disk(); st.session_state.clear(); st.rerun()
+    if st.button("🚪 Выйти из системы", use_container_width=True, help="Завершить сеанс работы"):
+        clear_session_disk(); st.session_state.clear(); st.rerun()
 
 if st.session_state.get("page") == "main":
     show_main_page()
