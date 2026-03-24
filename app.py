@@ -423,19 +423,25 @@ def sync_with_google_drive():
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
         
-        # Создаём credentials.json из secrets
+        # === СОЗДАЁМ credentials.json ИЗ SECRETS ===
         if not os.path.exists('credentials.json'):
             if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
-                encoded = st.secrets['google_credentials']['json_data']
-                decoded = base64.b64decode(encoded)
-                with open('credentials.json', 'wb') as f:
-                    f.write(decoded)
-                st.success("✅ credentials.json создан из secrets")
+                try:
+                    encoded = st.secrets['google_credentials']['json_data']
+                    decoded = base64.b64decode(encoded)
+                    with open('credentials.json', 'wb') as f:
+                        f.write(decoded)
+                    st.success("✅ credentials.json создан из secrets")
+                except Exception as e:
+                    st.error(f"❌ Ошибка создания credentials.json: {e}")
+                    return False
             else:
-                st.error("❌ Файл credentials.json не найден и нет secrets!")
-                st.info("📁 Добавьте credentials.json в Secrets (Settings → Secrets)")
+                st.error("❌ Файл credentials.json не найден!")
+                st.info("📁 Добавьте в Settings → Secrets:")
+                st.code('[google_credentials]\njson_data = "ваш_base64_код"', language='toml')
                 return False
         
+        # === АВТОРИЗАЦИЯ ===
         creds = None
         if os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
@@ -452,6 +458,7 @@ def sync_with_google_drive():
             st.success("✅ Авторизация успешна! Токен сохранён.")
             st.rerun()
 
+        # === СИНХРОНИЗАЦИЯ ===
         service = build('drive', 'v3', credentials=creds)
         results = service.files().list(
             q=f"name='{BACKUP_FILENAME}' and trashed=false",
