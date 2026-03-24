@@ -418,13 +418,23 @@ def sync_with_google_drive():
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
         from google.auth.transport.requests import Request
+        import base64
         
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
         
+        # Создаём credentials.json из secrets
         if not os.path.exists('credentials.json'):
-            st.error("❌ Файл credentials.json не найден!")
-            return False
+            if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
+                encoded = st.secrets['google_credentials']['json_data']
+                decoded = base64.b64decode(encoded)
+                with open('credentials.json', 'wb') as f:
+                    f.write(decoded)
+                st.success("✅ credentials.json создан из secrets")
+            else:
+                st.error("❌ Файл credentials.json не найден и нет secrets!")
+                st.info("📁 Добавьте credentials.json в Secrets (Settings → Secrets)")
+                return False
         
         creds = None
         if os.path.exists('token.json'):
@@ -443,7 +453,11 @@ def sync_with_google_drive():
             st.rerun()
 
         service = build('drive', 'v3', credentials=creds)
-        results = service.files().list(q=f"name='{BACKUP_FILENAME}' and trashed=false", spaces='drive', fields='files(id, modifiedTime)').execute()
+        results = service.files().list(
+            q=f"name='{BACKUP_FILENAME}' and trashed=false",
+            spaces='drive',
+            fields='files(id, modifiedTime)'
+        ).execute()
         files = results.get('files', [])
         
         local_path = get_current_db_name()
@@ -451,16 +465,24 @@ def sync_with_google_drive():
         
         if not files:
             media = MediaFileUpload(local_path, mimetype='application/octet-stream')
-            service.files().create(body={'name': BACKUP_FILENAME}, media_body=media).execute()
+            service.files().create(
+                body={'name': BACKUP_FILENAME},
+                media_body=media
+            ).execute()
             st.success("✅ Загружено в Google Drive!")
             return True
         else:
-            cloud_mtime = datetime.fromisoformat(files[0]['modifiedTime'].replace('Z', '+00:00'))
+            cloud_mtime = datetime.fromisoformat(
+                files[0]['modifiedTime'].replace('Z', '+00:00')
+            )
             local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
             
             if local_mtime_aware > cloud_mtime:
                 media = MediaFileUpload(local_path, mimetype='application/octet-stream')
-                service.files().update(fileId=files[0]['id'], media_body=media).execute()
+                service.files().update(
+                    fileId=files[0]['id'],
+                    media_body=media
+                ).execute()
                 st.success("✅ Обновлено в Google Drive!")
                 return True
             else:
