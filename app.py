@@ -7,6 +7,7 @@ import pandas as pd
 import shutil
 import json
 from pathlib import Path
+import base64
 
 # ===== НАСТРОЙКИ =====
 AUTH_DB = "users.db"
@@ -418,12 +419,11 @@ def sync_with_google_drive():
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
         from google.auth.transport.requests import Request
-        import base64
         
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
         
-        # === СОЗДАЁМ credentials.json ИЗ SECRETS ===
+        # Создаём credentials.json из secrets
         if not os.path.exists('credentials.json'):
             if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
                 try:
@@ -441,7 +441,6 @@ def sync_with_google_drive():
                 st.code('[google_credentials]\njson_data = "ваш_base64_код"', language='toml')
                 return False
         
-        # === АВТОРИЗАЦИЯ ===
         creds = None
         if os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
@@ -458,7 +457,6 @@ def sync_with_google_drive():
             st.success("✅ Авторизация успешна! Токен сохранён.")
             st.rerun()
 
-        # === СИНХРОНИЗАЦИЯ ===
         service = build('drive', 'v3', credentials=creds)
         results = service.files().list(
             q=f"name='{BACKUP_FILENAME}' and trashed=false",
@@ -509,6 +507,7 @@ def sync_with_google_drive():
     except Exception as e:
         st.error(f"❌ Ошибка синхронизации: {str(e)}")
         return False
+
 # ===== СТРАНИЦЫ =====
 def show_main_page():
     st.title(f"🚕 {st.session_state['username']}")
@@ -789,7 +788,7 @@ with st.sidebar:
     <div style="text-align: center; padding: 20px 0;">
         <div style="font-size: 4rem; margin-bottom: 10px;">🚕</div>
         <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 5px;">{st.session_state['username']}</div>
-        <div style="color: #64748b; font-size: 0.9rem;">👨‍ водитель</div>
+        <div style="color: #64748b; font-size: 0.9rem;">👨‍💼 водитель</div>
     </div>
     """, unsafe_allow_html=True)
     
