@@ -510,6 +510,58 @@ def sync_with_google_drive():
         st.error(f"❌ Ошибка синхронизации: {str(e)}")
         return False
 
+        # === СИНХРОНИЗАЦИЯ ===
+        service = build('drive', 'v3', credentials=creds)
+        results = service.files().list(
+            q=f"name='{BACKUP_FILENAME}' and trashed=false",
+            spaces='drive',
+            fields='files(id, modifiedTime)'
+        ).execute()
+        files = results.get('files', [])
+        
+        local_path = get_current_db_name()
+        local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
+        
+        if not files:
+            media = MediaFileUpload(local_path, mimetype='application/octet-stream')
+            service.files().create(
+                body={'name': BACKUP_FILENAME},
+                media_body=media
+            ).execute()
+            st.success("✅ Загружено в Google Drive!")
+            return True
+        else:
+            cloud_mtime = datetime.fromisoformat(
+                files[0]['modifiedTime'].replace('Z', '+00:00')
+            )
+            local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
+            
+            if local_mtime_aware > cloud_mtime:
+                media = MediaFileUpload(local_path, mimetype='application/octet-stream')
+                service.files().update(
+                    fileId=files[0]['id'],
+                    media_body=media
+                ).execute()
+                st.success("✅ Обновлено в Google Drive!")
+                return True
+            else:
+                request = service.files().get_media(fileId=files[0]['id'])
+                temp_path = local_path + ".temp"
+                with open(temp_path, 'wb') as f:
+                    downloader = MediaIoBaseDownload(f, request)
+                    done = False
+                    while not done:
+                        status, done = downloader.next_chunk()
+                shutil.copy2(temp_path, local_path)
+                os.remove(temp_path)
+                st.success("✅ Скачано из Google Drive!")
+                st.cache_data.clear()
+                st.rerun()
+                
+    except Exception as e:
+        st.error(f"❌ Ошибка синхронизации: {str(e)}")
+        return False
+
 # ===== СТРАНИЦЫ =====
 def show_main_page():
     st.title(f"🚕 {st.session_state['username']}")
