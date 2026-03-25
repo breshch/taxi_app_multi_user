@@ -156,6 +156,51 @@ def register_user(username: str, password: str) -> bool:
         conn.close()
 
 # ===== СМЕНЫ И ЗАКАЗЫ =====
+
+def update_order_and_adjust_beznal(
+    order_id: int,
+    order_type: str,
+    amount: float,
+    tips: float,
+    commission: float,
+    total: float,
+    beznal_added: float,
+):
+    """Обновляет заказ и корректирует накопленный безнал."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        # Получаем старое значение beznal_added
+        c.execute("SELECT beznal_added FROM orders WHERE id = ?", (order_id,))
+        old_row = c.fetchone()
+        old_beznal = old_row[0] if old_row else 0.0
+        
+        # Обновляем заказ
+        c.execute(
+            """
+            UPDATE orders 
+            SET type = ?, amount = ?, tips = ?, commission = ?, total = ?, beznal_added = ?
+            WHERE id = ?
+            """,
+            (order_type, amount, tips, commission, total, beznal_added, order_id),
+        )
+        
+        # Корректируем накопленный безнал (разница между новым и старым)
+        diff = beznal_added - old_beznal
+        c.execute(
+            """
+            UPDATE accumulated_beznal
+            SET total_amount = total_amount + ?, last_updated = ?
+            WHERE driver_id = 1
+            """,
+            (diff, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 def get_open_shift(username: str):
     conn = get_db_connection(username)
     c = conn.cursor()
