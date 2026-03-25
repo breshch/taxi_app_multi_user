@@ -3,7 +3,6 @@ import sqlite3
 from datetime import datetime
 import pandas as pd
 import os
-from typing import Optional
 
 def get_user_dir(username: str) -> str:
     if not username:

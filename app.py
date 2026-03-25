@@ -283,34 +283,6 @@ def get_total_extra_expenses(shift_id: int) -> float:
     conn.close()
     return row[0] or 0.0
 
-# =============================================================================
-# ФИКС №2: add_order_db + обновление безнала — одна атомарная транзакция.
-# Раньше это были два отдельных коннекта: если приложение падало между ними,
-# заказ сохранялся, а безнал — нет (рассинхрон данных).
-# =============================================================================
-def add_order_and_update_beznal(shift_id, order_type, amount, tips, commission, total, beznal_added, order_time):
-    """Атомарно сохраняет заказ и обновляет накопленный безнал в одной транзакции."""
-    conn = get_db_connection()
-    try:
-        c = conn.cursor()
-        c.execute("""
-        INSERT INTO orders (shift_id, type, amount, tips, commission, total, beznal_added, order_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (shift_id, order_type, amount, tips, commission, total, beznal_added, order_time))
-
-        if beznal_added != 0:
-            c.execute(
-                "UPDATE accumulated_beznal SET total_amount = total_amount + ?, last_updated = ? WHERE driver_id = 1",
-                (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-            )
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-# Оставляем старые функции для совместимости с pages_imports.py
 def add_order_db(shift_id, order_type, amount, tips, commission, total, beznal_added, order_time):
     conn = get_db_connection()
     c = conn.cursor()
@@ -367,38 +339,6 @@ def set_accumulated_beznal(amount: float):
               (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
-
-# =============================================================================
-# ФИКС №2 (продолжение): атомарное удаление заказа с откатом безнала.
-# =============================================================================
-def delete_order_and_update_beznal(order_id: int):
-    """Атомарно удаляет заказ и откатывает его вклад в накопленный безнал."""
-    conn = get_db_connection()
-    try:
-        c = conn.cursor()
-        # Получаем beznal_added удаляемого заказа, чтобы откатить его
-        c.execute("SELECT beznal_added FROM orders WHERE id = ?", (order_id,))
-        row = c.fetchone()
-        if not row:
-            return  # Заказ уже удалён
-
-        beznal_added = row[0] or 0.0
-
-        # Удаляем заказ
-        c.execute("DELETE FROM orders WHERE id = ?", (order_id,))
-
-        # Откатываем безнал (вычитаем то, что было добавлено при сохранении)
-        if beznal_added != 0:
-            c.execute(
-                "UPDATE accumulated_beznal SET total_amount = total_amount - ?, last_updated = ? WHERE driver_id = 1",
-                (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-            )
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
 
 def get_last_fuel_params():
     conn = get_db_connection()
@@ -469,12 +409,13 @@ def upload_and_restore_backup(uploaded_file):
     return False
 
 # ===== GOOGLE DRIVE СИНХРОНИЗАЦИЯ =====
-def sync_with_google_drive(username: str):
+def sync_with_google_drive():
     try:
-        from google.oauth2 import web
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-        import base64
+        from google.auth.transport.requests import Request
         
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
@@ -495,42 +436,51 @@ def sync_with_google_drive(username: str):
                 st.error("❌ credentials.json не найден!")
                 return False
         
-        # Для Streamlit Cloud используем ручную авторизацию
-        st.info("🔐 Google Drive авторизация")
-        st.markdown("""
-        <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
-            <p><strong>Инструкция:</strong></p>
-            <ol>
-                <li>Откройте: <a href='https://developers.google.com/oauthplayground' target='_blank'>Google OAuth Playground</a></li>
-                <li>Выберите Scope: <code>https://www.googleapis.com/auth/drive.file</code></li>
-                <li>Нажмите "Authorize APIs" и войдите в аккаунт</li>
-                <li>Скопируйте Access Token</li>
-                <li>Вставьте токен ниже</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
+        creds = None
+        if os.path.exists('token.json'):
+            try:
+                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+            except:
+                os.remove('token.json')
+                creds = None
         
-        access_token = st.text_input("🔑 Access Token из OAuth Playground:")
-        
-        if st.button("✅ Подтвердить токен"):
-            if access_token:
-                # Сохраняем токен во временный файл
-                with open('token.json', 'w') as f:
-                    json.dump({
-                        "token": access_token,
-                        "scopes": SCOPES
-                    }, f)
-                st.success("✅ Токен сохранён!")
-                st.rerun()
-        
-        if not os.path.exists('token.json'):
-            return False
-        
-        # Создаём credentials из токена
-        creds = web.Credentials(
-            token=access_token,
-            scopes=SCOPES
-        )
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except:
+                    creds = None
+            
+            if not creds:
+                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+                
+                # Генерируем URL авторизации
+                auth_url, _ = flow.authorization_url(
+                    access_type='offline',
+                    include_granted_scopes='true',
+                    prompt='consent'
+                )
+                
+                st.info("🔐 Требуется авторизация в Google")
+                st.markdown(f"""
+                <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
+                    <a href='{auth_url}' target='_blank' style='font-size: 1.1rem; color: #1976d2; font-weight: bold;'>
+                        🔗 Открыть страницу авторизации Google
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.warning("""
+                **Инструкция:**
+                1. Нажмите на ссылку выше
+                2. Выберите аккаунт
+                3. Разрешите доступ к Google Drive
+                4. Вернитесь сюда и обновите страницу
+                """)
+                
+                if st.button("🔄 Обновить после авторизации"):
+                    st.rerun()
+                return False
         
         # Синхронизация
         service = build('drive', 'v3', credentials=creds)
@@ -541,7 +491,7 @@ def sync_with_google_drive(username: str):
         ).execute()
         files = results.get('files', [])
         
-        local_path = get_current_db_name(username)
+        local_path = get_current_db_name()
         local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
         
         if not files:
@@ -580,7 +530,7 @@ def sync_with_google_drive(username: str):
 def show_main_page():
     st.title(f"🚕 {st.session_state['username']}")
     check_and_create_tables()
-
+    
     open_shift_data = get_open_shift()
     if not open_shift_data:
         st.info("📭 Нет открытой смены")
@@ -601,83 +551,29 @@ def show_main_page():
             amt = c1.text_input("Сумма заказа", placeholder="650")
             typ = c2.selectbox("Тип оплаты", ["НАЛ", "КАРТА"])
             tips = st.text_input("Чаевые", placeholder="0")
-
-            # Предпросмотр расчёта до сохранения
-            if amt:
-                try:
-                    a_preview = float(amt.replace(",", "."))
-                    t_preview = float(tips.replace(",", ".")) if tips else 0.0
-                    if typ == "НАЛ":
-                        comm_preview = a_preview * (1 - rate_nal)
-                        tot_preview = a_preview + t_preview
-                        bez_preview = -comm_preview
-                    else:
-                        final_preview = a_preview * rate_card
-                        comm_preview = a_preview - final_preview
-                        tot_preview = final_preview + t_preview
-                        bez_preview = final_preview
-                    st.caption(f"💡 Комиссия: **{comm_preview:.0f}₽** · Чистыми: **{tot_preview:.0f}₽** · Δ безнал: **{bez_preview:+.0f}₽**")
-                except:
-                    pass
-
-            # =================================================================
-            # ФИКС №2: используем атомарную функцию вместо двух отдельных
-            # =================================================================
             if st.button("💾 Сохранить заказ", width="stretch"):
                 if amt:
-                    try:
-                        a = float(amt.replace(",", "."))
-                        t = float(tips.replace(",", ".")) if tips else 0.0
-                        order_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
-                        if typ == "НАЛ":
-                            comm = a * (1 - rate_nal); tot = a + t; bez = -comm; db_type = "нал"
-                        else:
-                            final = a * rate_card; comm = a - final; tot = final + t; bez = final; db_type = "карта"
-                        # Одна атомарная транзакция — заказ + безнал вместе
-                        add_order_and_update_beznal(sid, db_type, a, t, comm, tot, bez, order_time)
-                        st.rerun()
-                    except ValueError:
-                        st.error("❌ Введите корректную сумму")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка сохранения: {e}")
+                    a = float(amt.replace(",", "."))
+                    t = float(tips.replace(",", ".")) if tips else 0.0
+                    order_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
+                    if typ == "НАЛ":
+                        comm = a * (1 - rate_nal); tot = a + t; bez = -comm; db_type = "нал"
+                    else:
+                        final = a * rate_card; comm = a - final; tot = final + t; bez = final; db_type = "карта"
+                    add_order_db(sid, db_type, a, t, comm, tot, bez, order_time)
+                    if bez != 0: add_to_accumulated_beznal(bez)
+                    st.rerun()
 
         orders = get_shift_orders(sid)
-        totals = get_shift_totals(sid) if orders else {}
-
         if orders:
             st.subheader("📋 Список заказов")
-            for order_row in orders:
-                order_id, tp, am, ti, _, tot, bez, tm = order_row
+            totals = get_shift_totals(sid)
+            for i, (_, tp, am, ti, _, tot, _, tm) in enumerate(orders, 1):
                 cols = st.columns([2, 1, 1])
-                cols[0].markdown(f"{'💵' if tp=='нал' else '💳'} {tm or ''} {am:.0f}₽")
+                cols[0].markdown(f"**#{i}** {tm or ''} {'💵' if tp=='нал' else '💳'} {am:.0f}₽")
                 cols[1].markdown(f"**{tot:.0f}**")
-
-                # =============================================================
-                # ФИКС №1: кнопка удаления теперь реально удаляет заказ из БД
-                # и атомарно откатывает его вклад в безнал.
-                # Раньше: st.success("Удалено"); st.rerun() — без удаления из БД!
-                # =============================================================
-                delete_key = f"del_order_{order_id}"
-                confirm_key = f"confirm_del_{order_id}"
-
-                if st.session_state.get(confirm_key):
-                    # Показываем подтверждение
-                    c1, c2 = cols[2].columns(2)
-                    if c1.button("✅", key=f"yes_{order_id}", help="Подтвердить удаление"):
-                        try:
-                            delete_order_and_update_beznal(order_id)
-                            st.session_state.pop(confirm_key, None)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Ошибка удаления: {e}")
-                    if c2.button("❌", key=f"no_{order_id}", help="Отмена"):
-                        st.session_state.pop(confirm_key, None)
-                        st.rerun()
-                else:
-                    if cols[2].button("🗑", key=delete_key):
-                        st.session_state[confirm_key] = True
-                        st.rerun()
-
+                if cols[2].button("🗑 Удалить", key=f"d{i}", width="stretch"):
+                    st.success("Удалено"); st.rerun()
             st.divider()
             st.metric("ДОХОД", f"{totals.get('нал',0)+totals.get('карта',0)+totals.get('чаевые',0):.0f}₽")
 
@@ -694,7 +590,7 @@ def show_main_page():
                         add_extra_expense(sid, exp_amt, exp_desc)
                         st.success("✅ Добавлено")
                         st.rerun()
-
+            
             st.divider()
             st.subheader("📋 Текущие расходы")
             expenses = get_extra_expenses(sid)
@@ -710,7 +606,7 @@ def show_main_page():
             if expenses:
                 st.divider()
                 st.metric("💸 ИТОГО РАСХОДЫ", f"{total_extra:.0f}₽")
-
+        
         st.divider()
         st.subheader("💰 ИТОГИ СМЕНЫ")
         total_income = totals.get('нал',0)+totals.get('карта',0)+totals.get('чаевые',0)
@@ -719,11 +615,7 @@ def show_main_page():
         col1.metric("📊 Доход", f"{total_income:.0f}₽")
         col2.metric("💸 Расходы", f"{total_extra:.0f}₽")
         col3.metric("📈 Чистыми", f"{total_income - total_extra:.0f}₽", delta=f"{total_income - total_extra:.0f}₽")
-
-        # =================================================================
-        # ФИКС №3: двойное подтверждение перед закрытием смены.
-        # Раньше смена закрывалась одной кнопкой без предупреждения.
-        # =================================================================
+        
         with st.expander("🔒 ЗАКРЫТЬ СМЕНУ", expanded=False):
             last_cons, last_price = get_last_fuel_params()
             km = st.number_input("Пробег (км)", value=100, key="km_close")
@@ -738,44 +630,26 @@ def show_main_page():
                 profit = total_income - total_extra - fuel_cost
                 st.info(f"⛽ {liters:.1f}л = {fuel_cost:.0f}₽")
                 st.success(f"💰 Прибыль: {profit:.0f}₽")
-
-            if not st.session_state.get("confirm_close_shift"):
-                if st.button("🔒 Закрыть смену", width="stretch", type="primary", key="close_shift"):
-                    st.session_state["confirm_close_shift"] = True
-                    st.rerun()
-            else:
-                st.warning("⚠️ Вы уверены? Смену нельзя будет снова открыть.")
-                c1, c2 = st.columns(2)
-                if c1.button("✅ Да, закрыть", type="primary", width="stretch", key="confirm_yes_close"):
-                    liters = (km / 100) * consumption if km > 0 else 0.0
-                    close_shift_db(sid, km, liters, fuel_price)
-                    st.session_state.pop("confirm_close_shift", None)
-                    st.success("✅ Смена закрыта")
-                    st.cache_data.clear()
-                    st.rerun()
-                if c2.button("❌ Отмена", width="stretch", key="confirm_no_close"):
-                    st.session_state.pop("confirm_close_shift", None)
-                    st.rerun()
+            if st.button("🔒 Закрыть смену", width="stretch", type="primary", key="close_shift"):
+                liters = (km / 100) * consumption if km > 0 else 0.0
+                close_shift_db(sid, km, liters, fuel_price)
+                st.success("✅ Смена закрыта")
+                st.cache_data.clear()
+                st.rerun()
 
 def show_reports_page():
     st.title("📊 ОТЧЁТЫ И СТАТИСТИКА")
     check_and_create_tables()
-    
-    username = st.session_state.get("username", "unknown")  # ← Добавили
-    
     try:
         from pages_imports import get_available_year_months_cached, get_month_totals_cached, format_month_option, get_month_shifts_details_cached
-        
-        # ← Передаём username во все функции
+        username = st.session_state.get("username", "unknown")
         year_months = get_available_year_months_cached(username)
-        
         if not year_months:
             st.info("📭 Нет закрытых смен")
             return
         
         ym = st.selectbox("📅 Выберите месяц", year_months, format_func=format_month_option, index=0)
         
-        # ← Передаём username
         totals = get_month_totals_cached(username, ym)
         st.subheader("💰 ИТОГИ ЗА МЕСЯЦ")
         col1, col2, col3, col4 = st.columns(4)
@@ -787,7 +661,6 @@ def show_reports_page():
         st.divider()
         
         st.subheader("📋 ОТЧЁТЫ ПО ДНЯМ")
-        # ← Передаём username
         df_shifts = get_month_shifts_details_cached(username, ym)
         if not df_shifts.empty:
             dates = df_shifts["Дата"].unique().tolist()
@@ -811,7 +684,6 @@ def show_reports_page():
         st.divider()
         
         from pages_imports import get_month_statistics
-        # ← Передаём username
         stats = get_month_statistics(username, ym)
         st.subheader("📈 СТАТИСТИКА ЗА МЕСЯЦ")
         c1, c2, c3 = st.columns(3)
@@ -839,28 +711,28 @@ def show_admin_page():
             st.rerun()
         else:
             st.error("Неверный пароль")
-
+    
     if st.session_state.get("admin_auth"):
         tabs = st.tabs(["📥 ИМПОРТ", "🔄 ПЕРЕСЧЁТ", "✏️ БЕЗНАЛ", "🗄 БЭКАПЫ", "💾 ЗАГРУЗКА", "☁️ GOOGLE DRIVE", "🔧 ИНСТРУМЕНТЫ"])
-
+        
         with tabs[0]:
             st.write("Импорт из Excel/CSV")
-
+        
         with tabs[1]:
             from pages_imports import recalc_full_db, get_accumulated_beznal
-            username = st.session_state.get("username", "unknown")  # ← Добавили
+            username = st.session_state.get("username", "unknown")
             if st.button("🔄 Пересчитать", width="stretch"):
-                new_total = recalc_full_db(username)  # ← Передаём username
+                new_total = recalc_full_db(username)
                 st.success(f"Готово. Безнал: {new_total:.0f} ₽")
-
+        
         with tabs[2]:
-            username = st.session_state.get("username", "unknown")  # ← Добавили
-            curr = get_accumulated_beznal(username)  # ← Передаём username
+            username = st.session_state.get("username", "unknown")
+            curr = get_accumulated_beznal(username)
             new_val = st.number_input("Значение", value=float(curr))
             if st.button("💾 Сохранить", width="stretch"):
-                set_accumulated_beznal(new_val)  # ← Эта функция тоже должна принимать username
+                set_accumulated_beznal(new_val)
                 st.success("Сохранено"); st.rerun()
-
+        
         with tabs[3]:
             if st.button("📦 Создать бэкап", width="stretch"):
                 path = create_backup()
@@ -887,12 +759,12 @@ def show_admin_page():
             st.info("Нажмите кнопку ниже для авторизации в Google.")
             if st.button("🔄 Синхронизировать", width="stretch", type="primary"):
                 sync_with_google_drive()
-
+        
         with tabs[6]:
             if st.button("🗑 Сброс", width="stretch"):
                 from pages_imports import reset_db
-                username = st.session_state.get("username", "unknown")  # ← Добавили
-                reset_db(username)  # ← Передаём username
+                username = st.session_state.get("username", "unknown")
+                reset_db(username)
                 st.success("Сброшено"); st.rerun()
 
 # ===== ЗАПУСК =====
@@ -934,7 +806,7 @@ with st.sidebar:
         <div style="color: #64748b; font-size: 0.9rem;">👨‍💼 водитель</div>
     </div>
     """, unsafe_allow_html=True)
-
+    
     try:
         db_path = get_current_db_name()
         if os.path.exists(db_path):
