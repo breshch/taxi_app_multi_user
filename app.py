@@ -1,3 +1,4 @@
+# app.py — ПОЛНАЯ ВЕРСИЯ с фиксом Google OAuth
 import os
 import json
 import base64
@@ -32,7 +33,6 @@ def apply_mobile_optimized_css():
     .block-container { padding-top: 3rem !important; padding-bottom: 2rem !important; max-width: 100% !important; margin-top: 2rem; }
     .stTitle { margin-top: 2rem !important; padding-top: 1rem !important; }
     .stButton button { width: 100%; min-height: 48px; }
-    .danger-button { background-color: #dc3545 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -376,7 +376,7 @@ def upload_and_restore_backup(file):
         return True
     return False
 
-# ===== GOOGLE DRIVE =====
+# ===== GOOGLE DRIVE (ВАРИАНТ 2: ДИНАМИЧЕСКИЙ REDIRECT_URI) =====
 def sync_with_google_drive():
     try:
         from google.oauth2.credentials import Credentials
@@ -387,6 +387,16 @@ def sync_with_google_drive():
         
         SCOPES = ["https://www.googleapis.com/auth/drive.file"]
         BACKUP_FILENAME = "taxi_backup.db"
+        
+        # 🔥 ОПРЕДЕЛЯЕМ REDIRECT_URI ДИНАМИЧЕСКИ
+        # Для Streamlit Cloud: берём из query params или используем дефолт
+        redirect_uri = st.query_params.get("redirect_uri")
+        if not redirect_uri:
+            # Определяем по хосту
+            if "streamlit.app" in st.runtime.get_instance()._server.base_url:
+                redirect_uri = "https://jetman.streamlit.app"
+            else:
+                redirect_uri = "http://localhost:8501"
         
         if not os.path.exists("credentials.json"):
             if hasattr(st, "secrets") and "google_credentials" in st.secrets:
@@ -407,8 +417,22 @@ def sync_with_google_drive():
                 except: creds = None
             if not creds:
                 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-                auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
-                st.markdown(f"[🔐 Авторизоваться в Google Drive]({auth_url})")
+                # 🔥 ПЕРЕДАЁМ REDIRECT_URI ЯВНО
+                auth_url, _ = flow.authorization_url(
+                    access_type="offline",
+                    include_granted_scopes="true",
+                    prompt="consent",
+                    redirect_uri=redirect_uri
+                )
+                st.info("🔐 Требуется авторизация Google")
+                st.markdown(f"""
+                 <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                     <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
+                        🔐 Авторизоваться в Google Drive
+                     </a>
+                 </div>
+                 """, unsafe_allow_html=True)
+                st.warning("1. Нажмите кнопку выше\n2. Войдите под своим Gmail\n3. Разрешите доступ к Drive\n4. Вернитесь и нажмите '🔄 Обновить'")
                 if st.button("🔄 Обновить страницу"): st.rerun()
                 return False
         
@@ -438,7 +462,7 @@ def sync_with_google_drive():
                 st.rerun()
         return True
     except Exception as e:
-        st.error(f"❌ Ошибка: {e}")
+        st.error(f"❌ Ошибка Google Drive: {e}")
         return False
 
 # ===== UI: ГЛАВНАЯ =====
@@ -622,7 +646,6 @@ def show_reports_page():
             get_month_statistics,
         )
         
-        # 1. Выбор месяца
         year_months = get_available_year_months_cached()
         if not year_months:
             st.info("ℹ️ Нет закрытых смен")
@@ -630,7 +653,6 @@ def show_reports_page():
         
         selected_ym = st.selectbox("📅 Выберите период (месяц)", year_months, index=0, format_func=format_month_option, width='stretch')
         
-        # 2. Выбор дня
         st.divider()
         available_days = get_available_days_cached(selected_ym)
         if available_days:
@@ -641,7 +663,6 @@ def show_reports_page():
                 width='stretch'
             )
             
-            # 3. Отчёт по дню
             day_report = get_day_report_cached(selected_day)
             st.subheader(f"📋 Отчёт за {selected_day[:10]}")
             
@@ -665,7 +686,6 @@ def show_reports_page():
         else:
             st.info(f"ℹ️ В {format_month_option(selected_ym)} нет закрытых смен")
         
-        # 4. Отчёт по месяцу
         st.subheader(f"📊 Итого за {format_month_option(selected_ym)}")
         totals = get_month_totals_cached(selected_ym)
         c1, c2, c3, c4 = st.columns(4)
@@ -733,7 +753,6 @@ def show_admin_page():
         with tab4:
             uploaded = st.file_uploader("📁 Загрузить файл .db", type="db")
             if uploaded and st.button("📥 Восстановить из файла", width='stretch'):
-                # 🔒 ПОДТВЕРЖДЕНИЕ ВОССТАНОВЛЕНИЯ
                 if not st.session_state.get("confirm_restore"):
                     st.session_state.confirm_restore = True
                     st.warning("⚠️ Подтвердите восстановление из файла")
@@ -759,7 +778,6 @@ def show_admin_page():
             st.subheader("⚠️ Опасная зона")
             st.error("⚠️ Внимание! Это действие нельзя отменить. Все данные будут удалены безвозвратно.")
             
-            # 🔒 ДВОЙНОЕ ПОДТВЕРЖДЕНИЕ СБРОСА БД
             if not st.session_state.get("confirm_reset_db"):
                 st.write("**Для подтверждения введите слово СБРОС**")
                 confirm_text = st.text_input("Введите 'СБРОС' для подтверждения", placeholder="СБРОС", width='stretch')
