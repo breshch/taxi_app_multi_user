@@ -416,6 +416,7 @@ def sync_with_google_drive():
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
         from google.auth.transport.requests import Request
+        import base64
         
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
@@ -453,6 +454,8 @@ def sync_with_google_drive():
             
             if not creds:
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+                
+                # Генерируем URL авторизации (для Streamlit Cloud)
                 auth_url, _ = flow.authorization_url(
                     access_type='offline',
                     include_granted_scopes='true',
@@ -523,7 +526,7 @@ def sync_with_google_drive():
     except Exception as e:
         st.error(f"❌ Ошибка: {str(e)}")
         return False
-
+    
 # ===== СТРАНИЦЫ =====
 def show_main_page():
     st.title(f"🚕 {st.session_state['username']}")
