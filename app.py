@@ -469,17 +469,16 @@ def upload_and_restore_backup(uploaded_file):
     return False
 
 # ===== GOOGLE DRIVE СИНХРОНИЗАЦИЯ =====
-def sync_with_google_drive():
+def sync_with_google_drive(username: str):
     try:
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
+        from google.oauth2 import web
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-        from google.auth.transport.requests import Request
-
+        import base64
+        
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
-
+        
         # Создаём credentials.json из secrets
         if not os.path.exists('credentials.json'):
             if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
@@ -495,52 +494,44 @@ def sync_with_google_drive():
             else:
                 st.error("❌ credentials.json не найден!")
                 return False
-
-        creds = None
-        if os.path.exists('token.json'):
-            try:
-                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-            except:
-                os.remove('token.json')
-                creds = None
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except:
-                    creds = None
-
-            if not creds:
-                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-
-                auth_url, _ = flow.authorization_url(
-                    access_type='offline',
-                    include_granted_scopes='true',
-                    prompt='consent'
-                )
-
-                st.info("🔐 Требуется авторизация в Google")
-                st.markdown(f"""
-                <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
-                    <a href='{auth_url}' target='_blank' style='font-size: 1.1rem; color: #1976d2; font-weight: bold;'>
-                        🔗 Открыть страницу авторизации Google
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
-
-                st.warning("""
-                **Инструкция:**
-                1. Нажмите на ссылку выше
-                2. Выберите аккаунт: `Breshch@gmail.com`
-                3. Разрешите доступ к Google Drive
-                4. Вернитесь сюда и обновите страницу
-                """)
-
-                if st.button("🔄 Обновить после авторизации"):
-                    st.rerun()
-                return False
-
+        
+        # Для Streamlit Cloud используем ручную авторизацию
+        st.info("🔐 Google Drive авторизация")
+        st.markdown("""
+        <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
+            <p><strong>Инструкция:</strong></p>
+            <ol>
+                <li>Откройте: <a href='https://developers.google.com/oauthplayground' target='_blank'>Google OAuth Playground</a></li>
+                <li>Выберите Scope: <code>https://www.googleapis.com/auth/drive.file</code></li>
+                <li>Нажмите "Authorize APIs" и войдите в аккаунт</li>
+                <li>Скопируйте Access Token</li>
+                <li>Вставьте токен ниже</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        access_token = st.text_input("🔑 Access Token из OAuth Playground:")
+        
+        if st.button("✅ Подтвердить токен"):
+            if access_token:
+                # Сохраняем токен во временный файл
+                with open('token.json', 'w') as f:
+                    json.dump({
+                        "token": access_token,
+                        "scopes": SCOPES
+                    }, f)
+                st.success("✅ Токен сохранён!")
+                st.rerun()
+        
+        if not os.path.exists('token.json'):
+            return False
+        
+        # Создаём credentials из токена
+        creds = web.Credentials(
+            token=access_token,
+            scopes=SCOPES
+        )
+        
         # Синхронизация
         service = build('drive', 'v3', credentials=creds)
         results = service.files().list(
@@ -549,10 +540,10 @@ def sync_with_google_drive():
             fields='files(id, modifiedTime)'
         ).execute()
         files = results.get('files', [])
-
-        local_path = get_current_db_name()
+        
+        local_path = get_current_db_name(username)
         local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
-
+        
         if not files:
             media = MediaFileUpload(local_path, mimetype='application/octet-stream')
             service.files().create(body={'name': BACKUP_FILENAME}, media_body=media).execute()
@@ -561,7 +552,7 @@ def sync_with_google_drive():
         else:
             cloud_mtime = datetime.fromisoformat(files[0]['modifiedTime'].replace('Z', '+00:00'))
             local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
-
+            
             if local_mtime_aware > cloud_mtime:
                 media = MediaFileUpload(local_path, mimetype='application/octet-stream')
                 service.files().update(fileId=files[0]['id'], media_body=media).execute()
@@ -580,7 +571,7 @@ def sync_with_google_drive():
                 st.success("✅ Скачано из Google Drive!")
                 st.cache_data.clear()
                 st.rerun()
-
+                
     except Exception as e:
         st.error(f"❌ Ошибка: {str(e)}")
         return False
