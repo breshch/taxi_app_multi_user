@@ -32,6 +32,7 @@ def apply_mobile_optimized_css():
     .block-container { padding-top: 3rem !important; padding-bottom: 2rem !important; max-width: 100% !important; margin-top: 2rem; }
     .stTitle { margin-top: 2rem !important; padding-top: 1rem !important; }
     .stButton button { width: 100%; min-height: 48px; }
+    .danger-button { background-color: #dc3545 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -408,7 +409,7 @@ def sync_with_google_drive():
                 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
                 auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
                 st.markdown(f"[🔐 Авторизоваться в Google Drive]({auth_url})")
-                if st.button("🔄 Обновить"): st.rerun()
+                if st.button("🔄 Обновить страницу"): st.rerun()
                 return False
         
         service = build("drive", "v3", credentials=creds)
@@ -449,7 +450,7 @@ def show_main_page():
     if not open_shift_data:
         st.info("ℹ️ Откройте смену для работы")
         with st.expander("📅 Открыть смену", expanded=True):
-            selected_date = st.date_input("Дата смены", value=date.today())
+            selected_date = st.date_input("📅 Дата смены", value=date.today())
             if st.button("✅ Открыть смену", width='stretch'):
                 open_shift(selected_date.strftime("%Y-%m-%d"))
                 st.rerun()
@@ -460,13 +461,13 @@ def show_main_page():
         acc = get_accumulated_beznal()
         if acc > 0: st.metric("💳 Накопленный безнал", f"{acc:.0f} ₽")
         
-        with st.expander("➕ Новый заказ", expanded=True):
+        with st.expander("➕ Добавить новый заказ", expanded=True):
             col1, col2 = st.columns([2, 1])
             with col1:
-                amount_str = st.text_input("Сумма чеком", placeholder="650", width='stretch')
+                amount_str = st.text_input("💰 Сумма чеком", placeholder="650", width='stretch')
             with col2:
-                order_type = st.selectbox("Тип", ["нал", "карта"], index=0, width='stretch')
-                tips_str = st.text_input("Чаевые", placeholder="0", width='stretch')
+                order_type = st.selectbox("💳 Тип оплаты", ["нал", "карта"], index=0, width='stretch')
+                tips_str = st.text_input("💡 Чаевые", placeholder="0", width='stretch')
             
             if st.button("✅ Добавить заказ", width='stretch'):
                 try:
@@ -491,7 +492,7 @@ def show_main_page():
         orders = get_shift_orders(shift_id)
         totals = get_shift_totals(shift_id)
         if orders:
-            st.subheader("📋 Заказы смены")
+            st.subheader("📋 Заказы текущей смены")
             for order_row in orders:
                 order_id, typ, am, ti, _, tot, bez, tm = order_row
                 cols = st.columns([3, 1, 1, 1])
@@ -500,15 +501,15 @@ def show_main_page():
                 cols[2].markdown(f"{bez:+.0f} ₽")
                 
                 edit_key = f"edit_{order_id}"
-                if cols[3].button("✏️", key=edit_key):
+                if cols[3].button("✏️ Изменить", key=edit_key, width='stretch'):
                     st.session_state[f"editing_{order_id}"] = True
                     st.rerun()
                 
                 if st.session_state.get(f"editing_{order_id}"):
-                    with st.expander(f"✏️ Редактирование #{order_id}", expanded=True):
-                        e_amt = st.number_input("Сумма", value=float(am), key=f"e_amt_{order_id}", width='stretch')
-                        e_type = st.selectbox("Тип", ["нал", "карта"], index=0 if typ == "нал" else 1, key=f"e_type_{order_id}", width='stretch')
-                        e_tips = st.number_input("Чаевые", value=float(ti or 0), key=f"e_tips_{order_id}", width='stretch')
+                    with st.expander(f"✏️ Редактирование заказа #{order_id}", expanded=True):
+                        e_amt = st.number_input("💰 Сумма", value=float(am), key=f"e_amt_{order_id}", width='stretch')
+                        e_type = st.selectbox("💳 Тип", ["нал", "карта"], index=0 if typ == "нал" else 1, key=f"e_type_{order_id}", width='stretch')
+                        e_tips = st.number_input("💡 Чаевые", value=float(ti or 0), key=f"e_tips_{order_id}", width='stretch')
                         if e_type == "нал":
                             e_comm = e_amt * (1 - RATE_NAL)
                             e_tot = e_amt + e_tips
@@ -518,12 +519,12 @@ def show_main_page():
                             e_comm = e_amt - e_final
                             e_tot = e_final + e_tips
                             e_bez = e_final
-                        if st.button("💾 Сохранить", key=f"save_{order_id}", width='stretch'):
+                        if st.button("💾 Сохранить изменения", key=f"save_{order_id}", width='stretch'):
                             update_order_and_adjust_beznal(order_id, e_type, e_amt, e_tips, e_comm, e_tot, e_bez)
                             st.session_state.pop(f"editing_{order_id}", None)
                             st.cache_data.clear()
                             st.rerun()
-                        if st.button("❌ Отмена", key=f"cancel_{order_id}", width='stretch'):
+                        if st.button("❌ Отменить редактирование", key=f"cancel_{order_id}", width='stretch'):
                             st.session_state.pop(f"editing_{order_id}", None)
                             st.rerun()
                     continue
@@ -532,26 +533,26 @@ def show_main_page():
                 conf_key = f"conf_{order_id}"
                 if st.session_state.get(conf_key):
                     c1, c2 = cols[3].columns(2)
-                    if c1.button("✅", key=f"yes_{order_id}", width='stretch'):
+                    if c1.button("✅ Да, удалить", key=f"yes_{order_id}", width='stretch'):
                         delete_order_and_update_beznal(order_id)
                         st.session_state.pop(conf_key, None)
                         st.rerun()
-                    if c2.button("❌", key=f"no_{order_id}", width='stretch'):
+                    if c2.button("❌ Отмена", key=f"no_{order_id}", width='stretch'):
                         st.session_state.pop(conf_key, None)
                         st.rerun()
-                elif cols[3].button("🗑️", key=del_key):
+                elif cols[3].button("🗑️ Удалить", key=del_key, width='stretch'):
                     st.session_state[conf_key] = True
                     st.rerun()
             
             st.divider()
-            st.metric("📊 Итого", f"{totals.get('нал', 0):.0f} + {totals.get('карта', 0):.0f} + {totals.get('чаевые', 0):.0f}")
+            st.metric("📊 Итого за смену", f"{totals.get('нал', 0):.0f} + {totals.get('карта', 0):.0f} + {totals.get('чаевые', 0):.0f}")
         
-        with st.expander("💸 Расходы", expanded=False):
+        with st.expander("💸 Дополнительные расходы", expanded=False):
             col1, col2, col3 = st.columns([2, 1, 1])
-            with col1: exp_desc = st.selectbox("Тип", POPULAR_EXPENSES, key="exp_desc", width='stretch')
-            with col2: exp_amt = st.number_input("Сумма", min_value=0.0, step=50.0, value=100.0, key="exp_amt", width='stretch')
+            with col1: exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc", width='stretch')
+            with col2: exp_amt = st.number_input("💰 Сумма", min_value=0.0, step=50.0, value=100.0, key="exp_amt", width='stretch')
             with col3:
-                if st.button("➕", key="add_exp", width='stretch'):
+                if st.button("➕ Добавить расход", key="add_exp", width='stretch'):
                     add_extra_expense(shift_id, exp_amt, exp_desc)
                     st.rerun()
             
@@ -561,27 +562,27 @@ def show_main_page():
                 cols = st.columns([3, 1, 1])
                 cols[0].markdown(f"**{exp['description']}**")
                 cols[1].markdown(f"{exp['amount']:.0f} ₽")
-                if cols[2].button("🗑️", key=f"del_exp_{exp['id']}", width='stretch'):
+                if cols[2].button("🗑️ Удалить", key=f"del_exp_{exp['id']}", width='stretch'):
                     delete_extra_expense(exp["id"])
                     st.rerun()
                 total_extra += exp["amount"]
             if expenses:
                 st.divider()
-                st.metric("Итого расходов", f"{total_extra:.0f} ₽")
+                st.metric("💸 Итого расходов", f"{total_extra:.0f} ₽")
         
         st.divider()
         total_income = totals.get("нал", 0) + totals.get("карта", 0) + totals.get("чаевые", 0)
         col1, col2, col3 = st.columns(3)
-        col1.metric("Доход", f"{total_income:.0f} ₽")
-        col2.metric("Расходы", f"{total_extra:.0f} ₽")
-        col3.metric("Прибыль", f"{total_income - total_extra:.0f} ₽")
+        col1.metric("💰 Доход", f"{total_income:.0f} ₽")
+        col2.metric("💸 Расходы", f"{total_extra:.0f} ₽")
+        col3.metric("📈 Прибыль", f"{total_income - total_extra:.0f} ₽")
         
         with st.expander("⛽ Закрыть смену", expanded=False):
             last_cons, last_price = get_last_fuel_params()
-            km = st.number_input("Пробег (км)", value=100, min_value=0, key="km_close", width='stretch')
+            km = st.number_input("🛣️ Пробег (км)", value=100, min_value=0, key="km_close", width='stretch')
             c1, c2 = st.columns(2)
-            with c1: cons = st.number_input("Расход (л/100км)", value=float(last_cons), step=0.5, key="cons_close", width='stretch')
-            with c2: price = st.number_input("Цена (₽/л)", value=float(last_price), step=1.0, key="fuel_close", width='stretch')
+            with c1: cons = st.number_input("⛽ Расход (л/100км)", value=float(last_cons), step=0.5, key="cons_close", width='stretch')
+            with c2: price = st.number_input("💰 Цена топлива (₽/л)", value=float(last_price), step=1.0, key="fuel_close", width='stretch')
             if km > 0 and cons > 0 and price > 0:
                 liters = (km / 100) * cons
                 st.info(f"🛢️ {liters:.1f} л × {price:.0f} ₽ = **{liters * price:.0f} ₽**")
@@ -590,8 +591,9 @@ def show_main_page():
                     st.session_state.confirm_close = True
                     st.rerun()
             else:
+                st.warning("⚠️ Подтвердите закрытие смены")
                 c1, c2 = st.columns(2)
-                if c1.button("✅ Да", width='stretch', type="primary"):
+                if c1.button("✅ Да, закрыть смену", width='stretch', type="primary"):
                     close_shift_db(shift_id, km, (km / 100) * cons if km > 0 else 0.0, price)
                     st.session_state.pop("confirm_close", None)
                     st.cache_data.clear()
@@ -626,7 +628,7 @@ def show_reports_page():
             st.info("ℹ️ Нет закрытых смен")
             return
         
-        selected_ym = st.selectbox("📅 Период (месяц)", year_months, index=0, format_func=format_month_option, width='stretch')
+        selected_ym = st.selectbox("📅 Выберите период (месяц)", year_months, index=0, format_func=format_month_option, width='stretch')
         
         # 2. Выбор дня
         st.divider()
@@ -667,10 +669,10 @@ def show_reports_page():
         st.subheader(f"📊 Итого за {format_month_option(selected_ym)}")
         totals = get_month_totals_cached(selected_ym)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Наличные", f"{totals.get('нал', 0):.0f} ₽")
-        c2.metric("Карта", f"{totals.get('карта', 0):.0f} ₽")
-        c3.metric("Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
-        c4.metric("Всего", f"{totals.get('всего', 0):.0f} ₽")
+        c1.metric("💵 Наличные", f"{totals.get('нал', 0):.0f} ₽")
+        c2.metric("💳 Карта", f"{totals.get('карта', 0):.0f} ₽")
+        c3.metric("💡 Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
+        c4.metric("💰 Всего", f"{totals.get('всего', 0):.0f} ₽")
         
         st.divider()
         df = get_month_shifts_details_cached(selected_ym)
@@ -679,13 +681,13 @@ def show_reports_page():
         st.divider()
         stats = get_month_statistics(selected_ym)
         c1, c2, c3 = st.columns(3)
-        c1.metric("Смен", stats.get("смен", 0))
-        c2.metric("Заказов", stats.get("заказов", 0))
-        c3.metric("Средний чек", f"{stats.get('средний_чек', 0):.0f} ₽")
+        c1.metric("🚕 Смен", stats.get("смен", 0))
+        c2.metric("📦 Заказов", stats.get("заказов", 0))
+        c3.metric("📊 Средний чек", f"{stats.get('средний_чек', 0):.0f} ₽")
         c1, c2, c3 = st.columns(3)
-        c1.metric("Бензин", f"{stats.get('бензин', 0):.0f} ₽")
-        c2.metric("Расходы", f"{stats.get('расходы', 0):.0f} ₽")
-        c3.metric("Прибыль", f"{stats.get('прибыль', 0):.0f} ₽", delta=f"{stats.get('рентабельность', 0):.1f}%")
+        c1.metric("⛽ Бензин", f"{stats.get('бензин', 0):.0f} ₽")
+        c2.metric("💸 Расходы", f"{stats.get('расходы', 0):.0f} ₽")
+        c3.metric("📈 Прибыль", f"{stats.get('прибыль', 0):.0f} ₽", delta=f"{stats.get('рентабельность', 0):.1f}%")
         
     except ImportError as e:
         st.error(f"❌ pages_imports.py: {e}")
@@ -696,49 +698,90 @@ def show_reports_page():
 def show_admin_page():
     st.title("🔧 Админка")
     admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
-    pwd = st.text_input("Пароль админа", type="password", width='stretch')
-    if st.button("Войти", width='stretch'):
+    pwd = st.text_input("🔑 Пароль админа", type="password", width='stretch')
+    if st.button("🔐 Войти в админку", width='stretch'):
         if pwd == admin_pwd:
             st.session_state.admin_auth = True
             st.rerun()
         else: st.error("❌ Неверный пароль")
     
     if st.session_state.get("admin_auth"):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Пересчёт", "Безнал", "Бэкапы", "Загрузка", "Google Drive", "Сброс"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔄 Пересчёт", "💳 Безнал", "📦 Бэкапы", "📥 Загрузка", "☁️ Google Drive", "⚠️ Сброс БД"])
+        
         with tab1:
+            st.write("**🔄 Пересчитать все комиссии по текущим ставкам**")
             if st.button("🔄 Пересчитать всё", width='stretch'):
                 from pages_imports import recalc_full_db
-                st.success(f"✅ Безнал: {recalc_full_db():.0f} ₽")
+                st.success(f"✅ Пересчитано. Безнал: {recalc_full_db():.0f} ₽")
+        
         with tab2:
-            new_val = st.number_input("Новый безнал", value=float(get_accumulated_beznal()), width='stretch')
-            if st.button("💾 Установить", width='stretch'):
+            new_val = st.number_input("💳 Новый накопленный безнал", value=float(get_accumulated_beznal()), width='stretch')
+            if st.button("💾 Установить значение", width='stretch'):
                 set_accumulated_beznal(new_val)
                 st.rerun()
+        
         with tab3:
-            if st.button("📦 Создать бэкап", width='stretch'):
+            if st.button("📦 Создать резервную копию", width='stretch'):
                 st.success(f"✅ {os.path.basename(create_backup())}")
             for b in list_backups():
                 cols = st.columns([3, 1, 1, 1])
                 cols[0].write(b["name"])
-                cols[1].download_button("⬇️", download_backup(b["path"]), b["name"], key=f"dl_{b['name']}", width='stretch')
-                cols[2].button("📥", key=f"rb_{b['name']}", on_click=lambda p=b["path"]: restore_from_backup(p), width='stretch')
-                cols[3].button("🗑️", key=f"xb_{b['name']}", on_click=lambda p=b["path"]: os.remove(p), width='stretch')
+                cols[1].download_button("⬇️ Скачать", download_backup(b["path"]), b["name"], key=f"dl_{b['name']}", width='stretch')
+                cols[2].button("📥 Восстановить", key=f"rb_{b['name']}", on_click=lambda p=b["path"]: restore_from_backup(p), width='stretch')
+                cols[3].button("🗑️ Удалить", key=f"xb_{b['name']}", on_click=lambda p=b["path"]: os.remove(p), width='stretch')
+        
         with tab4:
-            uploaded = st.file_uploader("Загрузить .db", type="db")
-            if uploaded and st.button("📥 Восстановить", width='stretch'):
-                if upload_and_restore_backup(uploaded):
-                    st.success("✅ Восстановлено!")
+            uploaded = st.file_uploader("📁 Загрузить файл .db", type="db")
+            if uploaded and st.button("📥 Восстановить из файла", width='stretch'):
+                # 🔒 ПОДТВЕРЖДЕНИЕ ВОССТАНОВЛЕНИЯ
+                if not st.session_state.get("confirm_restore"):
+                    st.session_state.confirm_restore = True
+                    st.warning("⚠️ Подтвердите восстановление из файла")
                     st.rerun()
+                else:
+                    c1, c2 = st.columns(2)
+                    if c1.button("✅ Да, восстановить", width='stretch', type="primary"):
+                        if upload_and_restore_backup(uploaded):
+                            st.success("✅ Восстановлено!")
+                            st.session_state.pop("confirm_restore", None)
+                            st.rerun()
+                    if c2.button("❌ Отмена", width='stretch'):
+                        st.session_state.pop("confirm_restore", None)
+                        st.rerun()
+        
         with tab5:
-            if st.button("🔄 Синхронизировать", width='stretch', type="primary"):
+            st.subheader("☁️ Google Drive синхронизация")
+            st.info("Автоматический бэкап и восстановление")
+            if st.button("🔄 Синхронизировать с Google Drive", width='stretch', type="primary"):
                 sync_with_google_drive()
+        
         with tab6:
-            if st.button("💥 СБРОСИТЬ БД", width='stretch', type="primary"):
-                from pages_imports import reset_db
-                reset_db()
-                st.cache_data.clear()
-                st.success("✅ Сброшено")
-                st.rerun()
+            st.subheader("⚠️ Опасная зона")
+            st.error("⚠️ Внимание! Это действие нельзя отменить. Все данные будут удалены безвозвратно.")
+            
+            # 🔒 ДВОЙНОЕ ПОДТВЕРЖДЕНИЕ СБРОСА БД
+            if not st.session_state.get("confirm_reset_db"):
+                st.write("**Для подтверждения введите слово СБРОС**")
+                confirm_text = st.text_input("Введите 'СБРОС' для подтверждения", placeholder="СБРОС", width='stretch')
+                if st.button("⚠️ СБРОСИТЬ БАЗУ ДАННЫХ", width='stretch', type="primary"):
+                    if confirm_text == "СБРОС":
+                        st.session_state.confirm_reset_db = True
+                        st.rerun()
+                    else:
+                        st.error("❌ Введите 'СБРОС' для подтверждения")
+            else:
+                st.warning("⚠️ Вы уверены? Это действие нельзя отменить!")
+                c1, c2 = st.columns(2)
+                if c1.button("✅ ДА, СБРОСИТЬ ВСЁ", width='stretch', type="primary"):
+                    from pages_imports import reset_db
+                    reset_db()
+                    st.cache_data.clear()
+                    st.session_state.pop("confirm_reset_db", None)
+                    st.success("✅ База данных сброшена")
+                    st.rerun()
+                if c2.button("❌ ОТМЕНА", width='stretch'):
+                    st.session_state.pop("confirm_reset_db", None)
+                    st.rerun()
 
 # ===== MAIN =====
 if __name__ == "__main__":
@@ -755,21 +798,21 @@ if __name__ == "__main__":
     
     if "username" not in st.session_state:
         st.title("🚕 Taxi Shift Manager")
-        st.markdown("### Вход / Регистрация")
+        st.markdown("### 🔐 Вход / Регистрация")
         u = st.text_input("👤 Логин", width='stretch')
         p = st.text_input("🔑 Пароль", type="password", width='stretch')
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("🚀 Войти", width='stretch'):
+            if st.button("🚀 Войти в систему", width='stretch'):
                 if authenticate_user(u, p):
                     st.session_state.username = u.strip()
                     st.session_state.page = "main"
                     st.rerun()
                 else: st.error("❌ Неверный логин/пароль")
         with c2:
-            if st.button("➕ Регистрация", width='stretch'):
+            if st.button("➕ Зарегистрироваться", width='stretch'):
                 if register_user(u, p):
-                    st.success("✅ Зарегистрирован! Войдите.")
+                    st.success("✅ Зарегистрирован! Теперь войдите.")
                 else: st.error("❌ Ошибка (логин занят?)")
         st.stop()
     
@@ -800,11 +843,11 @@ if __name__ == "__main__":
         except: pass
         
         st.divider()
-        if st.button("🏠 Главная", width='stretch'): st.session_state.page = "main"; st.rerun()
+        if st.button("🏠 Главная страница", width='stretch'): st.session_state.page = "main"; st.rerun()
         if st.button("📊 Отчёты", width='stretch'): st.session_state.page = "reports"; st.rerun()
-        if st.button("🔧 Админ", width='stretch'): st.session_state.page = "admin"; st.rerun()
+        if st.button("🔧 Админка", width='stretch'): st.session_state.page = "admin"; st.rerun()
         st.divider()
-        if st.button("👋 Выход", width='stretch'):
+        if st.button("👋 Выйти из системы", width='stretch'):
             clear_session_disk()
             st.session_state.clear()
             st.rerun()
