@@ -1,4 +1,3 @@
-# app.py — ПОЛНОСТЬЮ ЗАМЕНИТЕ СОДЕРЖИМОЕ
 import os
 import json
 import base64
@@ -7,67 +6,38 @@ import sqlite3
 from datetime import datetime, date, timezone, timedelta
 import pandas as pd
 import streamlit as st
-from passlib.hash import bcrypt
+from config import (
+    AUTH_DB, USERS_DIR, SESSION_FILE, SESSION_TIMEOUT, MOSCOW_TZ,
+    RATE_NAL, RATE_CARD, POPULAR_EXPENSES,
+    ensure_users_dir, get_user_dir, get_current_db_name, get_backup_dir,
+    init_auth_db, hash_password, verify_password, authenticate_user, register_user,
+    get_open_shift, open_shift, close_shift_db,
+    get_accumulated_beznal, set_accumulated_beznal,
+    add_order_and_update_beznal, delete_order_and_update_beznal, update_order_and_adjust_beznal,
+    get_shift_totals, get_last_fuel_params,
+    add_extra_expense, get_extra_expenses, delete_extra_expense, get_total_extra_expenses, get_shift_orders
+)
 
-# ===== НАСТРОЙКИ =====
-AUTH_DB = "users.db"
-USERS_DIR = "users"
-SESSION_FILE = "session.json"
-SESSION_TIMEOUT = 30 * 24 * 60 * 60
-RATE_NAL = 0.78
-RATE_CARD = 0.75
-MOSCOW_TZ = timezone(timedelta(hours=3))
-
-POPULAR_EXPENSES = [
-    "🚗 Мойка", "💧 Омывайка", "🍔 Еда", "☕ Кофе", "🚬 Сигареты",
-    "🔧 Мелкий ремонт", "🅿️ Парковка", "💰 Штраф", "🧴 Очиститель",
-    "🔋 Зарядка", "🧰 Инструмент", "📱 Связь", "🚕 Аренда", "💊 Аптека"
-]
-
-# ===== CSS =====
+# ===== CSS (мобильная оптимизация + отступы) =====
 def apply_mobile_optimized_css():
     st.markdown("""
     <style>
-    * { 
-        box-sizing: border-box; 
-    }
-    
-    /* Увеличиваем отступы сверху */
+    * { box-sizing: border-box; }
     .main > div { 
         padding-left: 0.5rem !important; 
         padding-right: 0.5rem !important; 
-        padding-top: 4rem !important;  /* ← БЫЛО: 2rem, СТАЛО: 4rem */
+        padding-top: 4rem !important;
     }
-    
-    /* Контейнер блоков */
     .block-container { 
-        padding-top: 3rem !important;   /* ← БЫЛО: 2rem, СТАЛО: 3rem */
+        padding-top: 3rem !important; 
         padding-bottom: 2rem !important; 
         max-width: 100% !important; 
-        margin-top: 2rem;               /* ← БЫЛО: 1rem, СТАЛО: 2rem */
+        margin-top: 2rem;
     }
-    
-    /* Заголовок страницы */
-    .stTitle {
-        margin-top: 2rem !important;
-        padding-top: 1rem !important;
-    }
-    
-    /* Сайдбар */
-    section[data-testid="stSidebar"] {
-        padding-top: 2rem !important;
-    }
-    
-    /* Хедер Streamlit (если виден) */
-    header {
-        margin-bottom: 1rem !important;
-    }
-    
-    /* Кнопки */
-    .stButton button { 
-        width: 100%; 
-        min-height: 48px; 
-    }
+    .stTitle { margin-top: 2rem !important; padding-top: 1rem !important; }
+    section[data-testid="stSidebar"] { padding-top: 2rem !important; }
+    header { margin-bottom: 1rem !important; }
+    .stButton button { width: 100%; min-height: 48px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -137,331 +107,18 @@ def get_session_time_remaining() -> str:
         return f"{days}д {hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-# ===== ПАПКИ =====
-def ensure_users_dir():
-    if not os.path.exists(USERS_DIR):
-        os.makedirs(USERS_DIR)
-
-def get_user_dir(username: str) -> str:
-    safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
-    if not safe_name:
-        safe_name = "user"
-    user_dir = os.path.join(USERS_DIR, safe_name)
-    if not os.path.exists(user_dir):
-        os.makedirs(user_dir)
-    return user_dir
-
-def get_current_db_name() -> str:
-    username = st.session_state.get("username")
-    if not username:
-        return "taxi_default.db"
-    safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
-    return os.path.join(get_user_dir(username), f"taxi{safe_name}.db")
-
-def get_backup_dir() -> str:
-    username = st.session_state.get("username", "unknown")
-    user_dir = get_user_dir(username)
-    backup_dir = os.path.join(user_dir, "backups")
-    if not os.path.exists(backup_dir):
-        os.makedirs(backup_dir)
-    return backup_dir
-
-# ===== БД =====
-def check_and_create_tables():
-    try:
-        conn = sqlite3.connect(get_current_db_name())
-        c = conn.cursor()
-        c.execute("""CREATE TABLE IF NOT EXISTS shifts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL, km INTEGER DEFAULT 0,
-            fuel_liters REAL DEFAULT 0, fuel_price REAL DEFAULT 0,
-            is_open INTEGER DEFAULT 1, opened_at TEXT, closed_at TEXT)""")
-        c.execute("""CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
-            type TEXT NOT NULL, amount REAL NOT NULL, tips REAL DEFAULT 0,
-            commission REAL NOT NULL, total REAL NOT NULL,
-            beznal_added REAL DEFAULT 0, order_time TEXT)""")
-        c.execute("""CREATE TABLE IF NOT EXISTS extra_expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
-            amount REAL DEFAULT 0, description TEXT, created_at TEXT)""")
-        c.execute("""CREATE TABLE IF NOT EXISTS accumulated_beznal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            driver_id INTEGER DEFAULT 1,
-            total_amount REAL DEFAULT 0,
-            last_updated TEXT)""")
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
-        if not cur.fetchone():
-            cur.execute(
-                "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, 0, ?)",
-                (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),)
-            )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"DB Error: {e}")
-        return False
-
-def get_db_connection():
-    check_and_create_tables()
-    return sqlite3.connect(get_current_db_name())
-
-# ===== АВТОРИЗАЦИЯ =====
-def init_auth_db():
-    conn = sqlite3.connect(AUTH_DB)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        password_hash TEXT NOT NULL,
-        created_at TEXT)""")
-    conn.commit()
-    conn.close()
-
-def hash_password(password: str) -> str:
-    pwd_bytes = password.strip().encode('utf-8')[:72]
-    return bcrypt.hash(pwd_bytes)
-
-def verify_password(password: str, password_hash: str) -> bool:
-    try:
-        pwd_bytes = password.strip().encode('utf-8')[:72]
-        return bcrypt.verify(pwd_bytes, password_hash)
-    except Exception:
-        return False
-
-def register_user(username: str, password: str) -> bool:
-    username = username.strip()
-    if not username or not password:
-        return False
-    ensure_users_dir()
-    init_auth_db()
-    conn = sqlite3.connect(AUTH_DB)
-    c = conn.cursor()
-    try:
-        c.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, hash_password(password), datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"))
-        )
-        conn.commit()
-        db_path = get_current_db_name()
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        check_and_create_tables()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    except Exception as e:
-        print(f"Ошибка регистрации: {e}")
-        return False
-    finally:
-        conn.close()
-
-def authenticate_user(username: str, password: str) -> bool:
-    init_auth_db()
-    conn = sqlite3.connect(AUTH_DB)
-    c = conn.cursor()
-    c.execute("SELECT password_hash FROM users WHERE username = ?", (username.strip(),))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return False
-    return verify_password(password, row[0])
-
-# ===== СМЕНЫ И ЗАКАЗЫ =====
-def get_open_shift():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, date FROM shifts WHERE is_open = 1 LIMIT 1")
-    row = c.fetchone()
-    conn.close()
-    return row
-
-def open_shift(date_str: str) -> int:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO shifts (date, is_open, opened_at) VALUES (?, 1, ?)",
-        (date_str, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    sid = c.lastrowid
-    conn.commit()
-    conn.close()
-    return sid
-
-def close_shift_db(shift_id: int, km: int, liters: float, fuel_price: float):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE shifts SET is_open = 0, km = ?, fuel_liters = ?, fuel_price = ?, closed_at = ? WHERE id = ?",
-        (km, liters, fuel_price, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"), shift_id),
-    )
-    conn.commit()
-    conn.close()
-
-def get_accumulated_beznal() -> float:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT total_amount FROM accumulated_beznal WHERE driver_id = 1")
-    row = c.fetchone()
-    conn.close()
-    return float(row[0]) if row and row[0] is not None else 0.0
-
-def set_accumulated_beznal(amount: float):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE accumulated_beznal SET total_amount = ?, last_updated = ? WHERE driver_id = 1",
-        (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    conn.close()
-
-def add_order_and_update_beznal(shift_id, order_type, amount, tips, commission, total, beznal_added, order_time):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute(
-            "INSERT INTO orders (shift_id, type, amount, tips, commission, total, beznal_added, order_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (shift_id, order_type, amount, tips, commission, total, beznal_added, order_time),
-        )
-        c.execute(
-            "UPDATE accumulated_beznal SET total_amount = total_amount + ?, last_updated = ? WHERE driver_id = 1",
-            (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-def delete_order_and_update_beznal(order_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT beznal_added FROM orders WHERE id = ?", (order_id,))
-        row = c.fetchone()
-        if not row:
-            return
-        beznal_added = row[0] or 0.0
-        c.execute("DELETE FROM orders WHERE id = ?", (order_id,))
-        c.execute(
-            "UPDATE accumulated_beznal SET total_amount = total_amount - ?, last_updated = ? WHERE driver_id = 1",
-            (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-# ===== ✏️ ИЗМЕНЕНИЕ ЗАКАЗА (НОВОЕ) =====
-def update_order_and_adjust_beznal(order_id, order_type, amount, tips, commission, total, beznal_added):
-    """Обновляет заказ и корректирует накопленный безнал."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT beznal_added FROM orders WHERE id = ?", (order_id,))
-        old_row = c.fetchone()
-        old_beznal = old_row[0] if old_row else 0.0
-        
-        c.execute(
-            "UPDATE orders SET type = ?, amount = ?, tips = ?, commission = ?, total = ?, beznal_added = ? WHERE id = ?",
-            (order_type, amount, tips, commission, total, beznal_added, order_id),
-        )
-        
-        diff = beznal_added - old_beznal
-        c.execute(
-            "UPDATE accumulated_beznal SET total_amount = total_amount + ?, last_updated = ? WHERE driver_id = 1",
-            (diff, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-def get_shift_totals(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT type, SUM(total - tips) FROM orders WHERE shift_id = ? GROUP BY type", (shift_id,))
-    by_type = dict(c.fetchall())
-    c.execute("SELECT SUM(tips), SUM(beznal_added) FROM orders WHERE shift_id = ?", (shift_id,))
-    tips, beznal = c.fetchone()
-    conn.close()
-    by_type["чаевые"] = tips or 0.0
-    by_type["безнал_смена"] = beznal or 0.0
-    return by_type
-
-def get_last_fuel_params():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "SELECT fuel_liters, km, fuel_price FROM shifts WHERE is_open = 0 AND km > 0 AND fuel_price > 0 ORDER BY closed_at DESC, id DESC LIMIT 1"
-    )
-    row = c.fetchone()
-    conn.close()
-    if row and row[0] and row[1]:
-        consumption = (row[0] / row[1]) * 100
-        return float(consumption), float(row[2] or 55.0)
-    return 8.0, 55.0
-
-def add_extra_expense(shift_id, amount, description):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO extra_expenses (shift_id, amount, description, created_at) VALUES (?, ?, ?, ?)",
-        (shift_id, amount, description, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    conn.close()
-
-def get_extra_expenses(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, amount, description, created_at FROM extra_expenses WHERE shift_id = ? ORDER BY id", (shift_id,))
-    rows = c.fetchall()
-    conn.close()
-    return [{"id": r[0], "amount": r[1] or 0.0, "description": r[2] or "", "created_at": r[3] or ""} for r in rows]
-
-def delete_extra_expense(expense_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM extra_expenses WHERE id = ?", (expense_id,))
-    conn.commit()
-    conn.close()
-
-def get_total_extra_expenses(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT SUM(amount) FROM extra_expenses WHERE shift_id = ?", (shift_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] or 0.0
-
-def get_shift_orders(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, type, amount, tips, commission, total, beznal_added, order_time FROM orders WHERE shift_id = ? ORDER BY id DESC", (shift_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
 # ===== БЕКАПЫ =====
-def create_backup():
-    backup_dir = get_backup_dir()
+def create_backup() -> str:
+    backup_dir = get_backup_dir(st.session_state.get("username", "unknown"))
     ts = datetime.now(MOSCOW_TZ).strftime("%Y%m%d_%H%M%S")
     username = st.session_state.get("username", "unknown")
     backup_name = f"taxi_{username}_backup_{ts}.db"
     backup_path = os.path.join(backup_dir, backup_name)
-    shutil.copy2(get_current_db_name(), backup_path)
+    shutil.copy2(get_current_db_name(st.session_state.get("username")), backup_path)
     return backup_path
 
-def list_backups():
-    backup_dir = get_backup_dir()
+def list_backups() -> list:
+    backup_dir = get_backup_dir(st.session_state.get("username", "unknown"))
     if not os.path.exists(backup_dir):
         return []
     backups = []
@@ -469,19 +126,16 @@ def list_backups():
         if filename.endswith(".db"):
             filepath = os.path.join(backup_dir, filename)
             stat = os.stat(filepath)
-            backups.append({
-                "name": filename, "path": filepath,
-                "time": datetime.fromtimestamp(stat.st_mtime),
-                "size": stat.st_size / 1024,
-            })
+            backups.append({"name": filename, "path": filepath, "time": datetime.fromtimestamp(stat.st_mtime), "size": stat.st_size / 1024})
     backups.sort(key=lambda x: x["time"], reverse=True)
     return backups
 
-def restore_from_backup(backup_path):
+def restore_from_backup(backup_path: str):
     if not os.path.exists(backup_path):
         raise FileNotFoundError(f"Файл бэкапа не найден: {backup_path}")
     create_backup()
-    shutil.copy2(backup_path, get_current_db_name())
+    shutil.copy2(backup_path, get_current_db_name(st.session_state.get("username")))
+    st.cache_data.clear()  # 🔥 Очистка кэша
 
 def download_backup(backup_path):
     with open(backup_path, "rb") as f:
@@ -489,7 +143,7 @@ def download_backup(backup_path):
 
 def upload_and_restore_backup(uploaded_file):
     if uploaded_file is not None:
-        temp_path = os.path.join(get_backup_dir(), "temp_restore.db")
+        temp_path = os.path.join(get_backup_dir(st.session_state.get("username", "unknown")), "temp_restore.db")
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
         restore_from_backup(temp_path)
@@ -497,6 +151,7 @@ def upload_and_restore_backup(uploaded_file):
             os.remove(temp_path)
         except:
             pass
+        st.cache_data.clear()  # 🔥 Очистка кэша
         return True
     return False
 
@@ -553,7 +208,7 @@ def sync_with_google_drive():
         service = build("drive", "v3", credentials=creds)
         results = service.files().list(q=f"name='{BACKUP_FILENAME}' and trashed=false", spaces="drive", fields="files(id, modifiedTime)").execute()
         files = results.get("files", [])
-        local_path = get_current_db_name()
+        local_path = get_current_db_name(st.session_state.get("username"))
         local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
         if not files:
             media = MediaFileUpload(local_path, mimetype="application/octet-stream")
@@ -588,29 +243,29 @@ def sync_with_google_drive():
 # ===== UI: ГЛАВНАЯ =====
 def show_main_page():
     st.title(f"👨‍💼 {st.session_state.username}")
-    check_and_create_tables()
-    open_shift_data = get_open_shift()
+    username = st.session_state.username
+    open_shift_data = get_open_shift(username)
     if not open_shift_data:
         st.info("ℹ️ Откройте смену для работы")
         with st.expander("📅 Открыть смену", expanded=True):
             selected_date = st.date_input("Дата смены", value=date.today())
             if st.button("✅ Открыть смену", width='stretch'):
-                open_shift(selected_date.strftime("%Y-%m-%d"))
+                open_shift(selected_date.strftime("%Y-%m-%d"), username)
                 st.success(f"✅ Смена открыта: {selected_date.strftime('%Y-%m-%d')}")
                 st.rerun()
     else:
         shift_id, date_str = open_shift_data
         st.success(f"✅ Смена открыта: **{date_str}**")
-        acc_beznal = get_accumulated_beznal()
+        acc_beznal = get_accumulated_beznal(username)
         if acc_beznal > 0:
             st.metric("💳 Накопленный безнал", f"{acc_beznal:.0f} ₽")
         with st.expander("➕ Новый заказ", expanded=True):
             col1, col2 = st.columns([2, 1])
             with col1:
-                amount_str = st.text_input("Сумма чеком", placeholder="650")
+                amount_str = st.text_input("Сумма чеком", placeholder="650", width='stretch')
             with col2:
-                order_type = st.selectbox("Тип", ["нал", "карта"], index=0, help="нал=78%, карта=75%")
-                tips_str = st.text_input("Чаевые", placeholder="0", help="Сумма чаевых")
+                order_type = st.selectbox("Тип", ["нал", "карта"], index=0, help="нал=78%, карта=75%", width='stretch')
+                tips_str = st.text_input("Чаевые", placeholder="0", help="Сумма чаевых", width='stretch')
             try:
                 amount = float(amount_str.replace(",", "."))
                 tips = float(tips_str.replace(",", ".")) if tips_str else 0.0
@@ -642,7 +297,7 @@ def show_main_page():
                         total = final_wo_tips + tips
                         beznal_added = final_wo_tips
                         db_type = "карта"
-                    add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
+                    add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time, username)
                     st.success("✅ Заказ добавлен!")
                     st.rerun()
                 except ValueError:
@@ -651,8 +306,8 @@ def show_main_page():
                     st.error(f"❌ Ошибка: {e}")
         
         # ===== СПИСОК ЗАКАЗОВ С КНОПКОЙ ✏️ ИЗМЕНИТЬ =====
-        orders = get_shift_orders(shift_id)
-        totals = get_shift_totals(shift_id)
+        orders = get_shift_orders(shift_id, username)
+        totals = get_shift_totals(shift_id, username)
         if orders:
             st.subheader("📋 Заказы смены")
             for order_row in orders:
@@ -661,25 +316,23 @@ def show_main_page():
                 delete_key = f"del_order_{order_id}"
                 confirm_key = f"confirm_del_order_{order_id}"
                 
-                cols = st.columns([3, 1, 1, 1])  # 4 колонки: инфо, итого, безнал, кнопки
+                cols = st.columns([3, 1, 1, 1])
                 cols[0].markdown(f"**{typ}** | {tm or ''} | {am:.0f} ₽")
                 cols[1].markdown(f"{tot:.0f} ₽")
                 cols[2].markdown(f"{bez:+.0f} ₽")
                 
-                # Кнопка редактирования
                 if cols[3].button("✏️", key=edit_key, help="Изменить заказ"):
                     st.session_state[f"editing_order_{order_id}"] = True
                     st.rerun()
                 
-                # Режим редактирования
                 if st.session_state.get(f"editing_order_{order_id}"):
                     with st.expander(f"✏️ Редактирование заказа #{order_id}", expanded=True):
                         edit_col1, edit_col2 = st.columns([2, 1])
                         with edit_col1:
-                            edit_amount = st.number_input("Сумма", value=float(am), min_value=0.0, step=10.0, key=f"edit_amt_{order_id}")
+                            edit_amount = st.number_input("Сумма", value=float(am), min_value=0.0, step=10.0, key=f"edit_amt_{order_id}", width='stretch')
                         with edit_col2:
-                            edit_type = st.selectbox("Тип", ["нал", "карта"], index=0 if typ == "нал" else 1, key=f"edit_type_{order_id}")
-                            edit_tips = st.number_input("Чаевые", value=float(ti or 0), min_value=0.0, step=10.0, key=f"edit_tips_{order_id}")
+                            edit_type = st.selectbox("Тип", ["нал", "карта"], index=0 if typ == "нал" else 1, key=f"edit_type_{order_id}", width='stretch')
+                            edit_tips = st.number_input("Чаевые", value=float(ti or 0), min_value=0.0, step=10.0, key=f"edit_tips_{order_id}", width='stretch')
                         if edit_type == "нал":
                             edit_commission = edit_amount * (1 - RATE_NAL)
                             edit_total = edit_amount + edit_tips
@@ -693,7 +346,7 @@ def show_main_page():
                         edit_btn_col1, edit_btn_col2 = st.columns(2)
                         if edit_btn_col1.button("💾 Сохранить", key=f"save_edit_{order_id}", width='stretch'):
                             try:
-                                update_order_and_adjust_beznal(order_id, edit_type, edit_amount, edit_tips, edit_commission, edit_total, edit_beznal)
+                                update_order_and_adjust_beznal(order_id, edit_type, edit_amount, edit_tips, edit_commission, edit_total, edit_beznal, username)
                                 st.session_state.pop(f"editing_order_{order_id}", None)
                                 st.success("✅ Заказ обновлён")
                                 st.cache_data.clear()
@@ -706,12 +359,11 @@ def show_main_page():
                     st.divider()
                     continue
                 
-                # Кнопка удаления
                 if st.session_state.get(confirm_key):
                     c1, c2 = cols[3].columns(2)
                     if c1.button("✅ Удалить", key=f"yes_{order_id}", width='stretch'):
                         try:
-                            delete_order_and_update_beznal(order_id)
+                            delete_order_and_update_beznal(order_id, username)
                             st.session_state.pop(confirm_key, None)
                             st.success("✅ Заказ удалён")
                             st.rerun()
@@ -730,24 +382,24 @@ def show_main_page():
             st.subheader("Добавить расход")
             col1, col2, col3 = st.columns([2, 1, 1])
             with col1:
-                exp_desc = st.selectbox("Тип", POPULAR_EXPENSES, key="exp_desc")
+                exp_desc = st.selectbox("Тип", POPULAR_EXPENSES, key="exp_desc", width='stretch')
             with col2:
-                exp_amt = st.number_input("Сумма", min_value=0.0, step=50.0, value=100.0, key="exp_amt")
+                exp_amt = st.number_input("Сумма", min_value=0.0, step=50.0, value=100.0, key="exp_amt", width='stretch')
             with col3:
                 if st.button("➕ Добавить", width='stretch', key="add_exp"):
                     if exp_desc and exp_amt > 0:
-                        add_extra_expense(shift_id, exp_amt, exp_desc)
+                        add_extra_expense(shift_id, exp_amt, exp_desc, username)
                         st.success("✅ Расход добавлен")
                         st.rerun()
             st.divider()
-            expenses = get_extra_expenses(shift_id)
+            expenses = get_extra_expenses(shift_id, username)
             total_extra = 0.0
             for exp in expenses:
                 cols = st.columns([3, 1, 1])
                 cols[0].markdown(f"**{exp['description']}**")
                 cols[1].markdown(f"{exp['amount']:.0f} ₽")
                 if cols[2].button("🗑️", key=f"del_exp_{exp['id']}", width='stretch'):
-                    delete_extra_expense(exp["id"])
+                    delete_extra_expense(exp["id"], username)
                     st.rerun()
                 total_extra += exp["amount"]
             if expenses:
@@ -757,20 +409,20 @@ def show_main_page():
         st.divider()
         st.subheader("📈 Итоги смены")
         total_income = totals.get("нал", 0) + totals.get("карта", 0) + totals.get("чаевые", 0)
-        total_extra = get_total_extra_expenses(shift_id)
+        total_extra = get_total_extra_expenses(shift_id, username)
         col1, col2, col3 = st.columns(3)
         col1.metric("Доход", f"{total_income:.0f} ₽")
         col2.metric("Расходы", f"{total_extra:.0f} ₽")
         col3.metric("Прибыль", f"{total_income - total_extra:.0f} ₽", delta=f"{total_income - total_extra:.0f}")
         
         with st.expander("⛽ Закрыть смену", expanded=False):
-            last_cons, last_price = get_last_fuel_params()
-            km_close = st.number_input("Пробег (км)", value=100, min_value=0, key="km_close")
+            last_cons, last_price = get_last_fuel_params(username)
+            km_close = st.number_input("Пробег (км)", value=100, min_value=0, key="km_close", width='stretch')
             col1, col2 = st.columns(2)
             with col1:
-                consumption = st.number_input("Расход (л/100км)", value=float(last_cons), step=0.5, key="cons_close")
+                consumption = st.number_input("Расход (л/100км)", value=float(last_cons), step=0.5, key="cons_close", width='stretch')
             with col2:
-                fuel_price = st.number_input("Цена топлива (₽/л)", value=float(last_price), step=1.0, key="fuel_close")
+                fuel_price = st.number_input("Цена топлива (₽/л)", value=float(last_price), step=1.0, key="fuel_close", width='stretch')
             if km_close > 0 and consumption > 0 and fuel_price > 0:
                 liters = (km_close / 100) * consumption
                 fuel_cost = liters * fuel_price
@@ -786,7 +438,7 @@ def show_main_page():
                 col1, col2 = st.columns(2)
                 if col1.button("✅ Да, закрыть", width='stretch', type="primary"):
                     liters = (km_close / 100) * consumption if km_close > 0 else 0.0
-                    close_shift_db(shift_id, km_close, liters, fuel_price)
+                    close_shift_db(shift_id, km_close, liters, fuel_price, username)
                     st.session_state.pop("confirm_close_shift", None)
                     st.success("✅ Смена закрыта!")
                     st.cache_data.clear()
@@ -798,15 +450,18 @@ def show_main_page():
 # ===== UI: ОТЧЁТЫ =====
 def show_reports_page():
     st.title("📊 Отчёты")
-    check_and_create_tables()
+    if st.button("🔄 Обновить данные", key="refresh_reports"):
+        st.cache_data.clear()
+        st.rerun()
     try:
         from pages_imports import get_available_year_months_cached, get_month_totals_cached, format_month_option, get_month_shifts_details_cached, get_month_statistics
-        year_months = get_available_year_months_cached()
+        username = st.session_state.username
+        year_months = get_available_year_months_cached(username)
         if not year_months:
             st.info("ℹ️ Нет закрытых смен с заказами")
             return
-        selected_ym = st.selectbox("Период", year_months, index=0, format_func=format_month_option)
-        totals = get_month_totals_cached(selected_ym)
+        selected_ym = st.selectbox("Период", year_months, index=0, format_func=format_month_option, width='stretch')
+        totals = get_month_totals_cached(selected_ym, username)
         st.subheader(f"Итого за {format_month_option(selected_ym)}")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Наличные", f"{totals.get('нал', 0):.0f} ₽")
@@ -814,10 +469,10 @@ def show_reports_page():
         col3.metric("Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
         col4.metric("Всего", f"{totals.get('всего', 0):.0f} ₽")
         st.divider()
-        df_shifts = get_month_shifts_details_cached(selected_ym)
+        df_shifts = get_month_shifts_details_cached(selected_ym, username)
         if not df_shifts.empty:
             dates = df_shifts["Дата"].unique().tolist()
-            selected_date = st.selectbox("Смена", options=dates)
+            selected_date = st.selectbox("Смена", options=dates, width='stretch')
             df_day = df_shifts[df_shifts["Дата"] == selected_date].copy()
             if not df_day.empty:
                 st.dataframe(df_day, width='stretch')
@@ -828,7 +483,7 @@ def show_reports_page():
                 col2.metric("Топливо", f"{fuel_cost:.0f} ₽")
                 col3.metric("Прибыль", f"{row['Всего'] - fuel_cost:.0f} ₽")
         st.divider()
-        stats = get_month_statistics(selected_ym)
+        stats = get_month_statistics(selected_ym, username)
         col1, col2, col3 = st.columns(3)
         col1.metric("Смен", stats.get("смен", 0))
         col2.metric("Заказов", stats.get("заказов", 0))
@@ -846,7 +501,7 @@ def show_reports_page():
 def show_admin_page():
     st.title("🔧 Админка")
     admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
-    pwd = st.text_input("Пароль админа", type="password")
+    pwd = st.text_input("Пароль админа", type="password", width='stretch')
     if st.button("Войти", width='stretch'):
         if pwd == admin_pwd:
             st.session_state.admin_auth = True
@@ -855,17 +510,18 @@ def show_admin_page():
             st.error("❌ Неверный пароль")
     if st.session_state.get("admin_auth"):
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Пересчёт", "Безнал", "Бэкапы", "Загрузка", "Google Drive", "Сброс БД"])
+        username = st.session_state.username
         with tab1:
             st.write("**Пересчёт всех комиссий**")
             if st.button("🔄 Пересчитать всё", width='stretch'):
                 from pages_imports import recalc_full_db
-                new_total = recalc_full_db()
+                new_total = recalc_full_db(username)
                 st.success(f"✅ Пересчитано. Безнал: {new_total:.0f} ₽")
         with tab2:
-            curr = get_accumulated_beznal()
-            new_val = st.number_input("Новый безнал", value=float(curr))
+            curr = get_accumulated_beznal(username)
+            new_val = st.number_input("Новый безнал", value=float(curr), width='stretch')
             if st.button("💾 Установить", width='stretch'):
-                set_accumulated_beznal(new_val)
+                set_accumulated_beznal(new_val, username)
                 st.success("✅ Безнал обновлён")
                 st.rerun()
         with tab3:
@@ -893,7 +549,8 @@ def show_admin_page():
         with tab6:
             if st.button("💥 СБРОСИТЬ БД", width='stretch', type="primary"):
                 from pages_imports import reset_db
-                reset_db()
+                reset_db(username)
+                st.cache_data.clear()
                 st.success("✅ БД сброшена")
                 st.rerun()
 
@@ -911,8 +568,8 @@ if __name__ == "__main__":
     if "username" not in st.session_state:
         st.title("🚕 Taxi Shift Manager")
         st.markdown("### Вход / Регистрация")
-        u = st.text_input("👤 Логин")
-        p = st.text_input("🔑 Пароль", type="password")
+        u = st.text_input("👤 Логин", width='stretch')
+        p = st.text_input("🔑 Пароль", type="password", width='stretch')
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🚀 Войти", width='stretch'):
@@ -938,7 +595,7 @@ if __name__ == "__main__":
          </div>
          """, unsafe_allow_html=True)
         try:
-            db_path = get_current_db_name()
+            db_path = get_current_db_name(st.session_state.username)
             if os.path.exists(db_path):
                 size = os.path.getsize(db_path) / 1024
                 st.markdown(f"""
@@ -947,7 +604,7 @@ if __name__ == "__main__":
                      <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;">{size:.1f} KB</div>
                  </div>
                  """, unsafe_allow_html=True)
-            acc = get_accumulated_beznal()
+            acc = get_accumulated_beznal(st.session_state.username)
             st.markdown(f"""
              <div style="background: white; padding: 15px; border-radius: 12px; margin: 15px 0; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                  <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 5px;">Накопленный безнал</div>
