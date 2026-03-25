@@ -388,13 +388,8 @@ def sync_with_google_drive():
         SCOPES = ["https://www.googleapis.com/auth/drive.file"]
         BACKUP_FILENAME = "taxi_backup.db"
         
-        # 🔥 ОПРЕДЕЛЯЕМ REDIRECT_URI
-        # Для Streamlit Cloud используем фиксированный URL
+        # 🔥 ФИКСИРОВАННЫЙ REDIRECT_URI для Streamlit Cloud
         redirect_uri = "https://jetman.streamlit.app"
-        
-        # Проверяем, запущены ли локально
-        if "localhost" in st.runtime.get_instance()._server.base_url if hasattr(st.runtime, 'get_instance') else False:
-            redirect_uri = "http://localhost:8501"
         
         # credentials.json из secrets
         if not os.path.exists("credentials.json"):
@@ -474,27 +469,23 @@ def sync_with_google_drive():
         local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
         
         if not files:
-            # Загружаем локальный файл в Drive
             media = MediaFileUpload(local_path, mimetype="application/octet-stream")
             service.files().create(body={"name": BACKUP_FILENAME}, media_body=media).execute()
             st.success("✅ Загружено в Google Drive!")
             return True
         else:
-            # Сравниваем время изменения
             cloud_mtime = datetime.fromisoformat(
                 files[0]["modifiedTime"].replace("Z", "+00:00")
             )
             local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
             
             if local_mtime_aware > cloud_mtime:
-                # Локальный файл новее — обновляем Drive
                 media = MediaFileUpload(local_path, mimetype="application/octet-stream")
                 service.files().update(
                     fileId=files[0]["id"], media_body=media
                 ).execute()
                 st.success("✅ Обновлено в Google Drive!")
             else:
-                # Drive новее — скачиваем
                 request = service.files().get_media(fileId=files[0]["id"])
                 temp_path = local_path + ".temp"
                 with open(temp_path, "wb") as f:
