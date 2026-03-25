@@ -20,40 +20,39 @@ def get_current_db_name() -> str:
     if not username:
         return "taxi_default.db"
     safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
-    db_path = os.path.join("users", safe_name, f"taxi_{safe_name}.db")
-    return db_path
+    return os.path.join(get_user_dir(username), f"taxi{safe_name}.db")
 
 def get_connection():
     conn = sqlite3.connect(get_current_db_name())
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS shifts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL, km INTEGER DEFAULT 0,
-            fuel_liters REAL DEFAULT 0, fuel_price REAL DEFAULT 0,
-            is_open INTEGER DEFAULT 1, opened_at TEXT, closed_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS shifts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL, km INTEGER DEFAULT 0,
+        fuel_liters REAL DEFAULT 0, fuel_price REAL DEFAULT 0,
+        is_open INTEGER DEFAULT 1, opened_at TEXT, closed_at TEXT
+    )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
-            type TEXT NOT NULL, amount REAL NOT NULL, tips REAL DEFAULT 0,
-            commission REAL NOT NULL, total REAL NOT NULL,
-            beznal_added REAL DEFAULT 0, order_time TEXT
-        )
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
+        type TEXT NOT NULL, amount REAL NOT NULL, tips REAL DEFAULT 0,
+        commission REAL NOT NULL, total REAL NOT NULL,
+        beznal_added REAL DEFAULT 0, order_time TEXT
+    )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS extra_expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
-            amount REAL DEFAULT 0, description TEXT, created_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS extra_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
+        amount REAL DEFAULT 0, description TEXT, created_at TEXT
+    )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS accumulated_beznal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            driver_id INTEGER DEFAULT 1,
-            total_amount REAL DEFAULT 0,
-            last_updated TEXT
-        )
+    CREATE TABLE IF NOT EXISTS accumulated_beznal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER DEFAULT 1,
+        total_amount REAL DEFAULT 0,
+        last_updated TEXT
+    )
     """)
     cur = conn.cursor()
     cur.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
@@ -73,12 +72,12 @@ def get_available_year_months_cached():
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT DISTINCT strftime('%Y-%m', date)
-        FROM shifts
-        WHERE date IS NOT NULL AND TRIM(date) <> ''
-        AND is_open = 0
-        AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
-        ORDER BY 1 DESC
+    SELECT DISTINCT strftime('%Y-%m', date)
+    FROM shifts
+    WHERE date IS NOT NULL AND TRIM(date) <> ''
+    AND is_open = 0
+    AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
+    ORDER BY 1 DESC
     """)
     rows = cur.fetchall()
     conn.close()
@@ -96,12 +95,11 @@ def get_month_totals_cached(year_month: str):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT id FROM shifts
-        WHERE date LIKE ? AND is_open = 0
-        AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
+    SELECT id FROM shifts
+    WHERE date LIKE ? AND is_open = 0
+    AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
     """, (f"{year_month}%",))
     shifts = cur.fetchall()
-    
     total_nal = 0.0
     total_card = 0.0
     total_tips = 0.0
@@ -134,31 +132,30 @@ def get_month_totals_cached(year_month: str):
 def get_month_statistics(year_month: str):
     conn = get_connection()
     cur = conn.cursor()
-    
     cur.execute("SELECT COUNT(*) FROM shifts WHERE date LIKE ? AND is_open = 0", (f"{year_month}%",))
     shifts_count = cur.fetchone()[0] or 0
-    
+
     cur.execute("SELECT COUNT(*) FROM orders o JOIN shifts s ON o.shift_id = s.id WHERE s.date LIKE ? AND s.is_open = 0", (f"{year_month}%",))
     orders_count = cur.fetchone()[0] or 0
-    
+
     cur.execute("SELECT AVG(total) FROM orders o JOIN shifts s ON o.shift_id = s.id WHERE s.date LIKE ? AND s.is_open = 0", (f"{year_month}%",))
     avg_check = cur.fetchone()[0] or 0.0
-    
+
     cur.execute("SELECT SUM(fuel_liters * fuel_price) FROM shifts WHERE date LIKE ? AND is_open = 0", (f"{year_month}%",))
     fuel_cost = cur.fetchone()[0] or 0.0
-    
+
     cur.execute("SELECT SUM(e.amount) FROM extra_expenses e JOIN shifts s ON e.shift_id = s.id WHERE s.date LIKE ? AND s.is_open = 0", (f"{year_month}%",))
     extra_expenses = cur.fetchone()[0] or 0.0
-    
+
     totals = get_month_totals_cached(year_month)
     income = totals.get("всего", 0)
-    
+
     total_expenses = fuel_cost + extra_expenses
     profit = income - total_expenses
     profitability = (profit / income * 100) if income > 0 else 0
-    
+
     conn.close()
-    
+
     return {
         "смен": shifts_count,
         "заказов": orders_count,
@@ -174,15 +171,14 @@ def get_month_shifts_details_cached(year_month: str) -> pd.DataFrame:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT id, date, km, fuel_liters, fuel_price
-        FROM shifts
-        WHERE date LIKE ? AND is_open = 0
-        AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
-        ORDER BY date
+    SELECT id, date, km, fuel_liters, fuel_price
+    FROM shifts
+    WHERE date LIKE ? AND is_open = 0
+    AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id = shifts.id)
+    ORDER BY date
     """, (f"{year_month}%",))
     shifts = cur.fetchall()
     rows = []
-    
     for shift_id, date_str, km, fuel_liters, fuel_price in shifts:
         cur.execute("SELECT type, SUM(total - tips) FROM orders WHERE shift_id = ? GROUP BY type", (shift_id,))
         by_type = {t: s for t, s in cur.fetchall()}
@@ -263,14 +259,13 @@ def recalc_full_db():
             "UPDATE orders SET commission = ?, total = ?, beznal_added = ? WHERE id = ?",
             (commission, total, beznal_added, order_id)
         )
-    
     cur.execute("SELECT COALESCE(SUM(beznal_added), 0) FROM orders")
     total_beznal = cur.fetchone()[0] or 0.0
-    
+
     cur.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
     row = cur.fetchone()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     if row:
         cur.execute(
             "UPDATE accumulated_beznal SET total_amount = ?, last_updated = ? WHERE driver_id = 1",
@@ -281,7 +276,7 @@ def recalc_full_db():
             "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, ?, ?)",
             (total_beznal, now)
         )
-    
+
     conn.commit()
     conn.close()
     return total_beznal

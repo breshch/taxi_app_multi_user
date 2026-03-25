@@ -416,7 +416,6 @@ def sync_with_google_drive():
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
         from google.auth.transport.requests import Request
-        import base64
         
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
@@ -526,7 +525,7 @@ def sync_with_google_drive():
     except Exception as e:
         st.error(f"❌ Ошибка: {str(e)}")
         return False
-    
+
 # ===== СТРАНИЦЫ =====
 def show_main_page():
     st.title(f"🚕 {st.session_state['username']}")
