@@ -554,17 +554,17 @@ def sync_with_google_drive():
         from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
         from google.auth.transport.requests import Request
         import base64
-
-        SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-        BACKUP_FILENAME = "taxi_backup.db"
-
-        # Создаём credentials.json из secrets
-        if not os.path.exists("credentials.json"):
-            if hasattr(st, "secrets") and "google_credentials" in st.secrets:
+        
+        SCOPES = ['https://www.googleapis.com/auth/drive.file']
+        BACKUP_FILENAME = 'taxi_backup.db'
+        
+        # === СОЗДАЁМ credentials.json ИЗ SECRETS ===
+        if not os.path.exists('credentials.json'):
+            if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
                 try:
-                    encoded = st.secrets["google_credentials"]["json_data"]
+                    encoded = st.secrets['google_credentials']['json_data']
                     decoded = base64.b64decode(encoded)
-                    with open("credentials.json", "wb") as f:
+                    with open('credentials.json', 'wb') as f:
                         f.write(decoded)
                     st.success("✅ credentials.json создан из secrets")
                 except Exception as e:
@@ -573,69 +573,64 @@ def sync_with_google_drive():
             else:
                 st.error("❌ Файл credentials.json не найден!")
                 st.info("📁 Добавьте в Settings → Secrets:")
-                st.code(
-                    '[google_credentials]\njson_data = "ваш_base64_код"',
-                    language="toml",
-                )
+                st.code('[google_credentials]\njson_data = "ваш_base64_код"', language='toml')
                 return False
-
+        
+        # === АВТОРИЗАЦИЯ ===
         creds = None
-        if os.path.exists("token.json"):
-            creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    "credentials.json", SCOPES
-                )
+                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0, open_browser=True)
-
-            with open("token.json", "w", encoding="utf-8") as token:
+            
+            with open('token.json', 'w', encoding='utf-8') as token:
                 token.write(creds.to_json())
             st.success("✅ Авторизация успешна! Токен сохранён.")
             st.rerun()
 
-        service = build("drive", "v3", credentials=creds)
-        results = (
-            service.files()
-            .list(
-                q=f"name='{BACKUP_FILENAME}' and trashed=false",
-                spaces="drive",
-                fields="files(id, modifiedTime)",
-            )
-            .execute()
-        )
-        files = results.get("files", [])
-
+        # === СИНХРОНИЗАЦИЯ ===
+        service = build('drive', 'v3', credentials=creds)
+        results = service.files().list(
+            q=f"name='{BACKUP_FILENAME}' and trashed=false",
+            spaces='drive',
+            fields='files(id, modifiedTime)'
+        ).execute()
+        files = results.get('files', [])
+        
         local_path = get_current_db_name()
         local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
-
+        
         if not files:
-            media = MediaFileUpload(local_path, mimetype="application/octet-stream")
+            media = MediaFileUpload(local_path, mimetype='application/octet-stream')
             service.files().create(
-                body={"name": BACKUP_FILENAME}, media_body=media
+                body={'name': BACKUP_FILENAME},
+                media_body=media
             ).execute()
             st.success("✅ Загружено в Google Drive!")
             return True
         else:
             cloud_mtime = datetime.fromisoformat(
-                files[0]["modifiedTime"].replace("Z", "+00:00")
+                files[0]['modifiedTime'].replace('Z', '+00:00')
             )
             local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
-
+            
             if local_mtime_aware > cloud_mtime:
-                media = MediaFileUpload(local_path, mimetype="application/octet-stream")
+                media = MediaFileUpload(local_path, mimetype='application/octet-stream')
                 service.files().update(
-                    fileId=files[0]["id"], media_body=media
+                    fileId=files[0]['id'],
+                    media_body=media
                 ).execute()
                 st.success("✅ Обновлено в Google Drive!")
                 return True
             else:
-                request = service.files().get_media(fileId=files[0]["id"])
+                request = service.files().get_media(fileId=files[0]['id'])
                 temp_path = local_path + ".temp"
-                with open(temp_path, "wb") as f:
+                with open(temp_path, 'wb') as f:
                     downloader = MediaIoBaseDownload(f, request)
                     done = False
                     while not done:
@@ -645,7 +640,7 @@ def sync_with_google_drive():
                 st.success("✅ Скачано из Google Drive!")
                 st.cache_data.clear()
                 st.rerun()
-
+                
     except Exception as e:
         st.error(f"❌ Ошибка синхронизации: {str(e)}")
         return False
