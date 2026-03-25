@@ -28,10 +28,46 @@ POPULAR_EXPENSES = [
 def apply_mobile_optimized_css():
     st.markdown("""
     <style>
-    * { box-sizing: border-box; }
-    .main > div { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
-    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; max-width: 100% !important; }
-    .stButton button { width: 100%; min-height: 48px; }
+    * { 
+        box-sizing: border-box; 
+    }
+    
+    /* Увеличиваем отступы сверху */
+    .main > div { 
+        padding-left: 0.5rem !important; 
+        padding-right: 0.5rem !important; 
+        padding-top: 4rem !important;  /* ← БЫЛО: 2rem, СТАЛО: 4rem */
+    }
+    
+    /* Контейнер блоков */
+    .block-container { 
+        padding-top: 3rem !important;   /* ← БЫЛО: 2rem, СТАЛО: 3rem */
+        padding-bottom: 2rem !important; 
+        max-width: 100% !important; 
+        margin-top: 2rem;               /* ← БЫЛО: 1rem, СТАЛО: 2rem */
+    }
+    
+    /* Заголовок страницы */
+    .stTitle {
+        margin-top: 2rem !important;
+        padding-top: 1rem !important;
+    }
+    
+    /* Сайдбар */
+    section[data-testid="stSidebar"] {
+        padding-top: 2rem !important;
+    }
+    
+    /* Хедер Streamlit (если виден) */
+    header {
+        margin-bottom: 1rem !important;
+    }
+    
+    /* Кнопки */
+    .stButton button { 
+        width: 100%; 
+        min-height: 48px; 
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -558,7 +594,7 @@ def show_main_page():
         st.info("ℹ️ Откройте смену для работы")
         with st.expander("📅 Открыть смену", expanded=True):
             selected_date = st.date_input("Дата смены", value=date.today())
-            if st.button("✅ Открыть смену", use_container_width=True):
+            if st.button("✅ Открыть смену", width='stretch'):
                 open_shift(selected_date.strftime("%Y-%m-%d"))
                 st.success(f"✅ Смена открыта: {selected_date.strftime('%Y-%m-%d')}")
                 st.rerun()
@@ -590,7 +626,7 @@ def show_main_page():
                 st.caption(f"Комиссия: {commission:.0f} ₽ | Итого: {total:.0f} ₽ | Δ безнал: {beznal_added:+.0f} ₽")
             except ValueError:
                 pass
-            if st.button("✅ Добавить заказ", use_container_width=True):
+            if st.button("✅ Добавить заказ", width='stretch'):
                 try:
                     amount = float(amount_str.replace(",", "."))
                     tips = float(tips_str.replace(",", ".")) if tips_str else 0.0
@@ -655,7 +691,7 @@ def show_main_page():
                             edit_beznal = edit_final
                         st.caption(f"Комиссия: {edit_commission:.0f} ₽ | Итого: {edit_total:.0f} ₽ | Δ безнал: {edit_beznal:+.0f} ₽")
                         edit_btn_col1, edit_btn_col2 = st.columns(2)
-                        if edit_btn_col1.button("💾 Сохранить", key=f"save_edit_{order_id}", use_container_width=True):
+                        if edit_btn_col1.button("💾 Сохранить", key=f"save_edit_{order_id}", width='stretch'):
                             try:
                                 update_order_and_adjust_beznal(order_id, edit_type, edit_amount, edit_tips, edit_commission, edit_total, edit_beznal)
                                 st.session_state.pop(f"editing_order_{order_id}", None)
@@ -664,7 +700,7 @@ def show_main_page():
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ Ошибка: {e}")
-                        if edit_btn_col2.button("❌ Отмена", key=f"cancel_edit_{order_id}", use_container_width=True):
+                        if edit_btn_col2.button("❌ Отмена", key=f"cancel_edit_{order_id}", width='stretch'):
                             st.session_state.pop(f"editing_order_{order_id}", None)
                             st.rerun()
                     st.divider()
@@ -673,7 +709,7 @@ def show_main_page():
                 # Кнопка удаления
                 if st.session_state.get(confirm_key):
                     c1, c2 = cols[3].columns(2)
-                    if c1.button("✅ Удалить", key=f"yes_{order_id}", use_container_width=True):
+                    if c1.button("✅ Удалить", key=f"yes_{order_id}", width='stretch'):
                         try:
                             delete_order_and_update_beznal(order_id)
                             st.session_state.pop(confirm_key, None)
@@ -681,7 +717,7 @@ def show_main_page():
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ Ошибка: {e}")
-                    if c2.button("❌ Отмена", key=f"no_{order_id}", use_container_width=True):
+                    if c2.button("❌ Отмена", key=f"no_{order_id}", width='stretch'):
                         st.session_state.pop(confirm_key, None)
                         st.rerun()
                 elif cols[3].button("🗑️", key=delete_key, help="Удалить заказ"):
@@ -698,7 +734,7 @@ def show_main_page():
             with col2:
                 exp_amt = st.number_input("Сумма", min_value=0.0, step=50.0, value=100.0, key="exp_amt")
             with col3:
-                if st.button("➕ Добавить", use_container_width=True, key="add_exp"):
+                if st.button("➕ Добавить", width='stretch', key="add_exp"):
                     if exp_desc and exp_amt > 0:
                         add_extra_expense(shift_id, exp_amt, exp_desc)
                         st.success("✅ Расход добавлен")
@@ -710,7 +746,7 @@ def show_main_page():
                 cols = st.columns([3, 1, 1])
                 cols[0].markdown(f"**{exp['description']}**")
                 cols[1].markdown(f"{exp['amount']:.0f} ₽")
-                if cols[2].button("🗑️", key=f"del_exp_{exp['id']}", use_container_width=True):
+                if cols[2].button("🗑️", key=f"del_exp_{exp['id']}", width='stretch'):
                     delete_extra_expense(exp["id"])
                     st.rerun()
                 total_extra += exp["amount"]
@@ -742,20 +778,20 @@ def show_main_page():
                 st.info(f"🛢️ {liters:.1f} л × {fuel_price:.0f} ₽ = **{fuel_cost:.0f} ₽**")
                 st.success(f"💰 Чистая прибыль: **{profit:.0f} ₽**")
             if not st.session_state.get("confirm_close_shift"):
-                if st.button("🔒 Закрыть смену", use_container_width=True, type="primary"):
+                if st.button("🔒 Закрыть смену", width='stretch', type="primary"):
                     st.session_state.confirm_close_shift = True
                     st.rerun()
             else:
                 st.warning("⚠️ Подтвердите закрытие смены")
                 col1, col2 = st.columns(2)
-                if col1.button("✅ Да, закрыть", use_container_width=True, type="primary"):
+                if col1.button("✅ Да, закрыть", width='stretch', type="primary"):
                     liters = (km_close / 100) * consumption if km_close > 0 else 0.0
                     close_shift_db(shift_id, km_close, liters, fuel_price)
                     st.session_state.pop("confirm_close_shift", None)
                     st.success("✅ Смена закрыта!")
                     st.cache_data.clear()
                     st.rerun()
-                if col2.button("❌ Отмена", use_container_width=True):
+                if col2.button("❌ Отмена", width='stretch'):
                     st.session_state.pop("confirm_close_shift", None)
                     st.rerun()
 
@@ -784,7 +820,7 @@ def show_reports_page():
             selected_date = st.selectbox("Смена", options=dates)
             df_day = df_shifts[df_shifts["Дата"] == selected_date].copy()
             if not df_day.empty:
-                st.dataframe(df_day, use_container_width=True)
+                st.dataframe(df_day, width='stretch')
                 row = df_day.iloc[0]
                 fuel_cost = row["Литры"] * row["Цена"] if row["Литры"] > 0 else 0
                 col1, col2, col3 = st.columns(3)
@@ -811,7 +847,7 @@ def show_admin_page():
     st.title("🔧 Админка")
     admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
     pwd = st.text_input("Пароль админа", type="password")
-    if st.button("Войти", use_container_width=True):
+    if st.button("Войти", width='stretch'):
         if pwd == admin_pwd:
             st.session_state.admin_auth = True
             st.rerun()
@@ -821,41 +857,41 @@ def show_admin_page():
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Пересчёт", "Безнал", "Бэкапы", "Загрузка", "Google Drive", "Сброс БД"])
         with tab1:
             st.write("**Пересчёт всех комиссий**")
-            if st.button("🔄 Пересчитать всё", use_container_width=True):
+            if st.button("🔄 Пересчитать всё", width='stretch'):
                 from pages_imports import recalc_full_db
                 new_total = recalc_full_db()
                 st.success(f"✅ Пересчитано. Безнал: {new_total:.0f} ₽")
         with tab2:
             curr = get_accumulated_beznal()
             new_val = st.number_input("Новый безнал", value=float(curr))
-            if st.button("💾 Установить", use_container_width=True):
+            if st.button("💾 Установить", width='stretch'):
                 set_accumulated_beznal(new_val)
                 st.success("✅ Безнал обновлён")
                 st.rerun()
         with tab3:
-            if st.button("📦 Создать бэкап", use_container_width=True):
+            if st.button("📦 Создать бэкап", width='stretch'):
                 path = create_backup()
                 st.success(f"✅ {os.path.basename(path)}")
             backups = list_backups()
             for b in backups:
                 cols = st.columns([3, 1, 1, 1])
                 cols[0].write(b["name"])
-                cols[1].download_button(label="⬇️", data=download_backup(b["path"]), file_name=b["name"], key=f"db_{b['name']}", use_container_width=True)
-                cols[2].button("📥", key=f"rb_{b['name']}", on_click=lambda p=b["path"]: restore_from_backup(p), use_container_width=True)
-                cols[3].button("🗑️", key=f"xb_{b['name']}", on_click=lambda p=b["path"]: os.remove(p), use_container_width=True)
+                cols[1].download_button(label="⬇️", data=download_backup(b["path"]), file_name=b["name"], key=f"db_{b['name']}", width='stretch')
+                cols[2].button("📥", key=f"rb_{b['name']}", on_click=lambda p=b["path"]: restore_from_backup(p), width='stretch')
+                cols[3].button("🗑️", key=f"xb_{b['name']}", on_click=lambda p=b["path"]: os.remove(p), width='stretch')
         with tab4:
             uploaded = st.file_uploader("Загрузить .db", type="db")
-            if uploaded and st.button("📥 Восстановить", use_container_width=True):
+            if uploaded and st.button("📥 Восстановить", width='stretch'):
                 if upload_and_restore_backup(uploaded):
                     st.success("✅ Восстановлено!")
                     st.rerun()
         with tab5:
             st.subheader("Google Drive")
             st.info("Автоматический бэкап/восстановление")
-            if st.button("🔄 Синхронизировать", use_container_width=True, type="primary"):
+            if st.button("🔄 Синхронизировать", width='stretch', type="primary"):
                 sync_with_google_drive()
         with tab6:
-            if st.button("💥 СБРОСИТЬ БД", use_container_width=True, type="primary"):
+            if st.button("💥 СБРОСИТЬ БД", width='stretch', type="primary"):
                 from pages_imports import reset_db
                 reset_db()
                 st.success("✅ БД сброшена")
@@ -879,7 +915,7 @@ if __name__ == "__main__":
         p = st.text_input("🔑 Пароль", type="password")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🚀 Войти", use_container_width=True):
+            if st.button("🚀 Войти", width='stretch'):
                 if authenticate_user(u, p):
                     st.session_state.username = u.strip()
                     st.session_state.page = "main"
@@ -887,7 +923,7 @@ if __name__ == "__main__":
                 else:
                     st.error("❌ Неверный логин/пароль")
         with col2:
-            if st.button("➕ Регистрация", use_container_width=True):
+            if st.button("➕ Регистрация", width='stretch'):
                 if register_user(u, p):
                     st.success("✅ Зарегистрирован! Теперь войдите.")
                 else:
@@ -921,18 +957,18 @@ if __name__ == "__main__":
         except Exception as e:
             st.error(f"Сайдбар ошибка: {e}")
         st.divider()
-        if st.button("🏠 Главная", use_container_width=True):
+        if st.button("🏠 Главная", width='stretch'):
             st.session_state.page = "main"
             st.rerun()
-        if st.button("📊 Отчёты", use_container_width=True):
+        if st.button("📊 Отчёты", width='stretch'):
             st.session_state.page = "reports"
             st.rerun()
-        if st.button("🔧 Админ", use_container_width=True):
+        if st.button("🔧 Админ", width='stretch'):
             st.session_state.page = "admin"
             st.rerun()
         st.divider()
         st.caption(f"Осталось: {get_session_time_remaining()}")
-        if st.button("👋 Выход", use_container_width=True):
+        if st.button("👋 Выход", width='stretch'):
             clear_session_disk()
             st.session_state.clear()
             st.rerun()
