@@ -53,9 +53,8 @@ def get_day_report_cached(date_str: str) -> Dict:
     c = conn.cursor()
     c.execute("SELECT id, km, fuel_liters, fuel_price FROM shifts WHERE date = ? AND is_open = 0", (date_str,))
     shifts = c.fetchall()
-    
     total_income = total_nal = total_card = total_tips = total_fuel = total_extra = total_orders = 0.0
-    
+
     for shift_id, km, fuel_liters, fuel_price in shifts:
         c.execute("SELECT type, SUM(total - tips), SUM(tips) FROM orders WHERE shift_id = ? GROUP BY type", (shift_id,))
         for typ, summ, tips in c.fetchall():
@@ -70,7 +69,7 @@ def get_day_report_cached(date_str: str) -> Dict:
         total_fuel += (fuel_liters or 0.0) * (fuel_price or 0.0)
         c.execute("SELECT SUM(amount) FROM extra_expenses WHERE shift_id = ?", (shift_id,))
         total_extra += c.fetchone()[0] or 0.0
-    
+
     conn.close()
     return {
         "дата": date_str, "смен": len(shifts), "заказов": int(total_orders),

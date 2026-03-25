@@ -10,7 +10,6 @@ SESSION_TIMEOUT = 30 * 24 * 60 * 60
 RATE_NAL = 0.78
 RATE_CARD = 0.75
 MOSCOW_TZ = timezone(timedelta(hours=3))
-
 POPULAR_EXPENSES = [
     "🚗 Мойка", "💧 Омывайка", "🍔 Еда", "☕ Кофе", "🚬 Сигареты",
     "🔧 Мелкий ремонт", "🅿️ Парковка", "💰 Штраф", "🧴 Очиститель",

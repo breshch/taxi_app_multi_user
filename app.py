@@ -17,7 +17,6 @@ SESSION_TIMEOUT = 30 * 24 * 60 * 60
 RATE_NAL = 0.78
 RATE_CARD = 0.75
 MOSCOW_TZ = timezone(timedelta(hours=3))
-
 POPULAR_EXPENSES = [
     "🚗 Мойка", "💧 Омывайка", "🍔 Еда", "☕ Кофе", "🚬 Сигареты",
     "🔧 Мелкий ремонт", "🅿️ Парковка", "💰 Штраф", "🧴 Очиститель",
@@ -127,7 +126,7 @@ def check_and_create_tables():
         c.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
         if not c.fetchone():
             c.execute("INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, 0, ?)",
-                     (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),))
+                (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -163,7 +162,7 @@ def register_user(username: str, password: str) -> bool:
     c = conn.cursor()
     try:
         c.execute("INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-                 (username, hash_password(password), datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")))
+            (username, hash_password(password), datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")))
         conn.commit()
         db_path = get_current_db_name()
         if os.path.exists(db_path): os.remove(db_path)
@@ -194,7 +193,7 @@ def open_shift(date_str: str) -> int:
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT INTO shifts (date, is_open, opened_at) VALUES (?, 1, ?)",
-             (date_str, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+        (date_str, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
     sid = c.lastrowid
     conn.commit()
     conn.close()
@@ -204,7 +203,7 @@ def close_shift_db(shift_id: int, km: int, liters: float, fuel_price: float):
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("UPDATE shifts SET is_open = 0, km = ?, fuel_liters = ?, fuel_price = ?, closed_at = ? WHERE id = ?",
-             (km, liters, fuel_price, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"), shift_id))
+        (km, liters, fuel_price, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"), shift_id))
     conn.commit()
     conn.close()
 
@@ -221,7 +220,7 @@ def set_accumulated_beznal(amount: float):
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("UPDATE accumulated_beznal SET total_amount = ?, last_updated = ? WHERE driver_id = 1",
-             (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+        (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
 
@@ -230,9 +229,9 @@ def add_order_and_update_beznal(shift_id, order_type, amount, tips, commission, 
     c = conn.cursor()
     try:
         c.execute("INSERT INTO orders (shift_id, type, amount, tips, commission, total, beznal_added, order_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                 (shift_id, order_type, amount, tips, commission, total, beznal_added, order_time))
+            (shift_id, order_type, amount, tips, commission, total, beznal_added, order_time))
         c.execute("UPDATE accumulated_beznal SET total_amount = total_amount + ?, last_updated = ? WHERE driver_id = 1",
-                 (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+            (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -250,7 +249,7 @@ def delete_order_and_update_beznal(order_id):
             beznal = row[0] or 0.0
             c.execute("DELETE FROM orders WHERE id = ?", (order_id,))
             c.execute("UPDATE accumulated_beznal SET total_amount = total_amount - ?, last_updated = ? WHERE driver_id = 1",
-                     (beznal, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+                (beznal, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
             conn.commit()
     except Exception as e:
         conn.rollback()
@@ -266,10 +265,10 @@ def update_order_and_adjust_beznal(order_id, order_type, amount, tips, commissio
         old = c.fetchone()
         old_beznal = old[0] if old else 0.0
         c.execute("UPDATE orders SET type = ?, amount = ?, tips = ?, commission = ?, total = ?, beznal_added = ? WHERE id = ?",
-                 (order_type, amount, tips, commission, total, beznal_added, order_id))
+            (order_type, amount, tips, commission, total, beznal_added, order_id))
         diff = beznal_added - old_beznal
         c.execute("UPDATE accumulated_beznal SET total_amount = total_amount + ?, last_updated = ? WHERE driver_id = 1",
-                 (diff, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+            (diff, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -311,7 +310,7 @@ def add_extra_expense(shift_id, amount, description):
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT INTO extra_expenses (shift_id, amount, description, created_at) VALUES (?, ?, ?, ?)",
-             (shift_id, amount, description, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+        (shift_id, amount, description, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
 
@@ -342,7 +341,7 @@ def get_total_extra_expenses(shift_id):
 def create_backup():
     backup_dir = get_backup_dir()
     ts = datetime.now(MOSCOW_TZ).strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(backup_dir, f"taxi_{st.session_state.get('username', 'unknown')}_backup_{ts}.db")
+    path = os.path.join(backup_dir, f"taxi_{st.session_state.get('username', 'unknown')}backup{ts}.db")
     shutil.copy2(get_current_db_name(), path)
     return path
 
@@ -376,7 +375,7 @@ def upload_and_restore_backup(file):
         return True
     return False
 
-# ===== GOOGLE DRIVE (ВАРИАНТ 2: ДИНАМИЧЕСКИЙ REDIRECT_URI) =====
+# ===== GOOGLE DRIVE =====
 def sync_with_google_drive():
     try:
         from google.oauth2.credentials import Credentials
@@ -388,7 +387,6 @@ def sync_with_google_drive():
         SCOPES = ["https://www.googleapis.com/auth/drive.file"]
         BACKUP_FILENAME = "taxi_backup.db"
         
-        # credentials.json из secrets
         if not os.path.exists("credentials.json"):
             if hasattr(st, "secrets") and "google_credentials" in st.secrets:
                 try:
@@ -420,13 +418,11 @@ def sync_with_google_drive():
                     creds = None
             
             if not creds:
-                # 🔥 ВАЖНО: redirect_uri передаём ТОЛЬКО здесь!
                 flow = InstalledAppFlow.from_client_secrets_file(
                     "credentials.json",
                     SCOPES,
                     redirect_uri="https://jetman.streamlit.app"
                 )
-                # 🔥 НЕ передавать redirect_uri в authorization_url!
                 auth_url, _ = flow.authorization_url(
                     access_type="offline",
                     include_granted_scopes="true",
@@ -435,12 +431,12 @@ def sync_with_google_drive():
                 st.info("🔐 Требуется авторизация Google")
                 st.markdown(
                     f"""
-                     <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                         <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
+                    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                        <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
                             🔐 Авторизоваться в Google Drive
-                         </a>
-                     </div>
-                     """,
+                        </a>
+                    </div>
+                    """,
                     unsafe_allow_html=True,
                 )
                 st.warning(
@@ -455,7 +451,6 @@ def sync_with_google_drive():
         
         service = build("drive", "v3", credentials=creds)
         
-        # Ищем файл в Drive
         results = (
             service.files()
             .list(
@@ -511,7 +506,6 @@ def show_main_page():
     st.title(f"👨‍💼 {st.session_state.username}")
     check_and_create_tables()
     open_shift_data = get_open_shift()
-    
     if not open_shift_data:
         st.info("ℹ️ Откройте смену для работы")
         with st.expander("📅 Открыть смену", expanded=True):
@@ -671,11 +665,10 @@ def show_main_page():
 def show_reports_page():
     st.title("📊 Отчёты")
     check_and_create_tables()
-    
     if st.button("🔄 Обновить данные", width='stretch'):
         st.cache_data.clear()
         st.rerun()
-    
+
     try:
         from pages_imports import (
             get_available_year_months_cached,
@@ -849,12 +842,11 @@ if __name__ == "__main__":
     init_auth_db()
     ensure_users_dir()
     init_session()
-    
     saved = load_session_from_disk()
     if saved and "username" not in st.session_state:
         st.session_state.username = saved
         st.session_state.page = "main"
-    
+
     if "username" not in st.session_state:
         st.title("🚕 Taxi Shift Manager")
         st.markdown("### 🔐 Вход / Регистрация")
@@ -874,7 +866,7 @@ if __name__ == "__main__":
                     st.success("✅ Зарегистрирован! Теперь войдите.")
                 else: st.error("❌ Ошибка (логин занят?)")
         st.stop()
-    
+
     with st.sidebar:
         st.markdown(f"""
         <div style="text-align: center; padding: 20px 0;">
@@ -910,7 +902,7 @@ if __name__ == "__main__":
             clear_session_disk()
             st.session_state.clear()
             st.rerun()
-    
+
     page = st.session_state.get("page", "main")
     if page == "main": show_main_page()
     elif page == "reports": show_reports_page()
