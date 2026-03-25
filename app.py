@@ -377,7 +377,26 @@ def upload_and_restore_backup(file):
 
 # ===== GOOGLE DRIVE =====
 def sync_with_google_drive():
+    """Синхронизация с Google Drive с подробным логированием"""
+    import logging
+    import traceback
+    
+    # Настройка логирования
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('google_drive_debug.log', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info("=" * 80)
+        logger.info("🚀 НАЧАЛО СИНХРОНИЗАЦИИ С GOOGLE DRIVE")
+        logger.info("=" * 80)
+        
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
@@ -387,119 +406,392 @@ def sync_with_google_drive():
         SCOPES = ["https://www.googleapis.com/auth/drive.file"]
         BACKUP_FILENAME = "taxi_backup.db"
         
+        # ШАГ 1: Проверка credentials.json
+        logger.info("📋 ШАГ 1: Проверка credentials.json")
+        logger.info(f"   Текущая директория: {os.getcwd()}")
+        logger.info(f"   credentials.json существует: {os.path.exists('credentials.json')}")
+        
         if not os.path.exists("credentials.json"):
+            logger.warning("   ❌ credentials.json не найден, пробуем создать из secrets")
             if hasattr(st, "secrets") and "google_credentials" in st.secrets:
                 try:
                     encoded = st.secrets["google_credentials"]["json_data"]
+                    logger.debug(f"   Длина base64 данных: {len(encoded)}")
                     decoded = base64.b64decode(encoded)
                     with open("credentials.json", "wb") as f:
                         f.write(decoded)
-                    st.success("✅ credentials.json создан из secrets")
+                    logger.info("   ✅ credentials.json создан из secrets")
+                    
+                    # Проверяем содержимое
+                    with open("credentials.json", "r", encoding="utf-8") as f:
+                        content = f.read()
+                        logger.debug(f"   Размер файла: {len(content)} байт")
+                        logger.debug(f"   Первые 100 символов: {content[:100]}")
+                        
                 except Exception as e:
+                    logger.error(f"   ❌ Ошибка создания credentials.json: {e}")
+                    logger.error(f"   Stack trace: {traceback.format_exc()}")
                     st.error(f"❌ Ошибка secrets: {e}")
                     return False
             else:
+                logger.error("   ❌ credentials.json не найден и secrets не настроены")
                 st.error("❌ credentials.json не найден!")
                 return False
         
+        # ШАГ 2: Валидация JSON
+        logger.info("📋 ШАГ 2: Валидация credentials.json")
+        try:
+            with open("credentials.json", "r", encoding="utf-8") as f:
+                cred_data = json.load(f)
+                logger.debug(f"   Ключи в JSON: {list(cred_data.keys())}")
+                
+                if "web" in cred_data:
+                    web_keys = list(cred_data["web"].keys())
+                    logger.debug(f"   Ключи в 'web': {web_keys}")
+                    
+                    # Проверяем на пробелы в ключах
+                    keys_with_spaces = [k for k in web_keys if " " in k]
+                    if keys_with_spaces:
+                        logger.error(f"   ❌ Найдены ключи с пробелами: {keys_with_spaces}")
+                        st.error(f"❌ В credentials.json есть пробелы в ключах: {keys_with_spaces}")
+                        return False
+                    
+                    # Проверяем обязательные поля
+                    required_fields = ["client_id", "client_secret", "redirect_uris"]
+                    for field in required_fields:
+                        if field in cred_data["web"]:
+                            value = cred_data["web"][field]
+                            if isinstance(value, str):
+                                # Проверяем на пробелы в начале/конце
+                                if value != value.strip():
+                                    logger.warning(f"   ⚠️ Поле '{field}' имеет пробелы по краям")
+                                    logger.debug(f"   До: '{value}'")
+                                    logger.debug(f"   После: '{value.strip()}'")
+                                    # Очищаем
+                                    cred_data["web"][field] = value.strip()
+                            logger.info(f"   ✅ Поле '{field}' найдено")
+                        else:
+                            logger.error(f"   ❌ Поле '{field}' отсутствует")
+                    
+                    # Сохраняем очищенные данные
+                    with open("credentials.json", "w", encoding="utf-8") as f:
+                        json.dump(cred_data, f, ensure_ascii=False, indent=2)
+                    logger.info("   ✅ credentials.json очищен и сохранён")
+                    
+                else:
+                    logger.error("   ❌ Ключ 'web' не найден в credentials.json")
+                    st.error("❌ Неверная структура credentials.json")
+                    return False
+                    
+        except json.JSONDecodeError as e:
+            logger.error(f"   ❌ Ошибка парсинга JSON: {e}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
+            st.error(f"❌ Неверный формат credentials.json: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"   ❌ Неожиданная ошибка валидации: {e}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
+            st.error(f"❌ Ошибка валидации: {e}")
+            return False
+        
+        # ШАГ 3: Загрузка или создание credentials
+        logger.info("📋 ШАГ 3: Работа с OAuth токенами")
         creds = None
+        
         if os.path.exists("token.json"):
+            logger.info("   ✅ token.json найден, пытаемся загрузить")
             try:
                 creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-            except:
+                logger.info(f"   ✅ Token загружен успешно")
+                logger.debug(f"   Client ID: {creds.client_id[:20]}...")
+                logger.debug(f"   Token действителен: {creds.valid}")
+                logger.debug(f"   Token истёк: {creds.expired if hasattr(creds, 'expired') else 'N/A'}")
+                if hasattr(creds, 'expiry'):
+                    logger.debug(f"   Истекает: {creds.expiry}")
+            except Exception as e:
+                logger.warning(f"   ⚠️ Ошибка загрузки token.json: {e}")
+                logger.warning(f"   Удаляем невалидный token.json")
                 os.remove("token.json")
                 creds = None
+        else:
+            logger.info("   ℹ️ token.json не найден, требуется авторизация")
         
+        # ШАГ 4: Проверка валидности credentials
+        logger.info("📋 ШАГ 4: Проверка валидности credentials")
         if not creds or not creds.valid:
+            logger.info("   ⚠️ Credentials невалидны или отсутствуют")
+            
             if creds and creds.expired and creds.refresh_token:
+                logger.info("   🔄 Token истёк, но есть refresh_token, пытаемся обновить")
                 try:
-                    creds.refresh(Request())
-                except:
+                    logger.debug("   Вызываем creds.refresh(Request())")
+                    creds.refresh(Request())  # ✅ ИСПРАВЛЕНО: было Req uest()
+                    logger.info("   ✅ Token успешно обновлён")
+                    
+                    # Сохраняем обновлённый token
+                    with open("token.json", "w", encoding="utf-8") as f:
+                        f.write(creds.to_json())
+                    logger.info("   ✅ Обновлённый token.json сохранён")
+                    
+                    st.success("✅ Token обновлён!")
+                    return True
+                except Exception as e:
+                    logger.error(f"   ❌ Не удалось обновить token: {e}")
+                    logger.error(f"   Stack trace: {traceback.format_exc()}")
                     creds = None
             
+            # ШАГ 5: Создание новой авторизации
+            logger.info("📋 ШАГ 5: Создание новой OAuth авторизации")
             if not creds:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    "credentials.json",
-                    SCOPES,
-                    redirect_uri="https://jetman.streamlit.app"
-                )
-                auth_url, _ = flow.authorization_url(
-                    access_type="offline",
-                    include_granted_scopes="true",
-                    prompt="consent"
-                )
-                st.info("🔐 Требуется авторизация Google")
-                st.markdown(
-                    f"""
-                    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                        <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
-                            🔐 Авторизоваться в Google Drive
-                        </a>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.warning(
-                    "1. Нажмите кнопку выше\n"
-                    "2. Войдите под своим Gmail\n"
-                    "3. Разрешите доступ к Drive\n"
-                    "4. Вернитесь сюда и нажмите '🔄 Обновить'"
-                )
-                if st.button("🔄 Обновить", type="primary"):
-                    st.rerun()
-                return False
+                # Определяем redirect_uri
+                if os.getenv("STREAMLIT_SERVER_PORT"):
+                    redirect_uri = "http://localhost:8501"
+                    logger.info(f"   🌐 Локальный режим: {redirect_uri}")
+                else:
+                    redirect_uri = "https://jetman.streamlit.app"
+                    logger.info(f"   ☁️ Cloud режим: {redirect_uri}")
+                
+                try:
+                    logger.debug(f"   Создаём InstalledAppFlow")
+                    logger.debug(f"   redirect_uri: {redirect_uri}")
+                    
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        "credentials.json",
+                        SCOPES,
+                        redirect_uri=redirect_uri  # ✅ Без пробелов
+                    )
+                    logger.info("   ✅ InstalledAppFlow создан")
+                    
+                    # Генерируем URL авторизации
+                    logger.debug("   Генерируем authorization URL")
+                    auth_url, _ = flow.authorization_url(
+                        access_type="offline",
+                        include_granted_scopes="true",
+                        prompt="consent"
+                    )
+                    logger.info(f"   ✅ Authorization URL сгенерирован")
+                    logger.debug(f"   URL (первые 100 символов): {auth_url[:100]}...")
+                    
+                    # Показываем UI
+                    st.info("🔐 Требуется авторизация Google")
+                    st.markdown(
+                        f"""
+                        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                            <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
+                                🔐 Авторизоваться в Google Drive
+                            </a>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    
+                    st.warning(
+                        "📋 **Инструкция:**\n"
+                        "1. Нажмите кнопку выше\n"
+                        "2. Войдите под своим Gmail\n"
+                        "3. Разрешите доступ к Drive\n"
+                        "4. Скопируйте URL из браузера (с параметром code=)\n"
+                        "5. Вставьте URL в поле ниже"
+                    )
+                    
+                    # Поле для ввода кода
+                    auth_response_url = st.text_input(
+                        "📋 Вставьте URL после авторизации:",
+                        placeholder="http://localhost:8501/?code=4/0A...",
+                        width='stretch'
+                    )
+                    
+                    if st.button("🔄 Завершить авторизацию", type="primary", width='stretch'):
+                        logger.info("📋 ШАГ 6: Завершение авторизации")
+                        if auth_response_url and "code=" in auth_response_url:
+                            try:
+                                logger.debug(f"   Извлекаем code из URL")
+                                code = auth_response_url.split("code=")[1].split("&")[0]
+                                logger.debug(f"   Code (первые 50 символов): {code[:50]}...")
+                                
+                                logger.debug("   Вызываем flow.fetch_token()")
+                                flow.fetch_token(code=code)
+                                logger.info("   ✅ Token получен")
+                                
+                                creds = flow.credentials
+                                logger.debug(f"   Access token (первые 30 символов): {creds.token[:30]}...")
+                                
+                                # Сохраняем token
+                                logger.debug("   Сохраняем token.json")
+                                with open("token.json", "w", encoding="utf-8") as f:
+                                    f.write(creds.to_json())
+                                logger.info("   ✅ token.json сохранён")
+                                
+                                st.success("✅ Token создан! Перезагружаю страницу...")
+                                logger.info("✅ Авторизация завершена успешно!")
+                                time.sleep(2)
+                                st.rerun()
+                                
+                            except Exception as e:
+                                logger.error(f"   ❌ Ошибка завершения авторизации: {e}")
+                                logger.error(f"   Stack trace: {traceback.format_exc()}")
+                                st.error(f"❌ Ошибка: {e}")
+                        else:
+                            logger.warning("   ⚠️ Не введён URL с кодом")
+                            st.error("❌ Введите корректный URL с кодом")
+                    
+                    if st.button("🔄 Обновить страницу", width='stretch'):
+                        st.rerun()
+                    
+                    return False
+                    
+                except Exception as e:
+                    logger.error(f"   ❌ Ошибка создания OAuth flow: {e}")
+                    logger.error(f"   Stack trace: {traceback.format_exc()}")
+                    st.error(f"❌ Ошибка OAuth: {e}")
+                    return False
         
-        service = build("drive", "v3", credentials=creds)
+        # ШАГ 7: Создание сервиса Drive
+        logger.info("📋 ШАГ 7: Создание Google Drive API сервиса")
+        try:
+            service = build("drive", "v3", credentials=creds)
+            logger.info("   ✅ Сервис Drive создан успешно")
+        except Exception as e:
+            logger.error(f"   ❌ Ошибка создания сервиса: {e}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
+            st.error(f"❌ Ошибка создания сервиса: {e}")
+            return False
         
-        results = (
-            service.files()
-            .list(
-                q=f"name='{BACKUP_FILENAME}' and trashed=false",
-                spaces="drive",
-                fields="files(id, modifiedTime)",
+        # ШАГ 8: Поиск файла в Drive
+        logger.info("📋 ШАГ 8: Поиск файла в Google Drive")
+        try:
+            logger.debug(f"   Ищем файл: {BACKUP_FILENAME}")
+            results = (
+                service.files()
+                .list(
+                    q=f"name='{BACKUP_FILENAME}' and trashed=false",
+                    spaces="drive",
+                    fields="files(id, modifiedTime)",
+                )
+                .execute()
             )
-            .execute()
-        )
-        files = results.get("files", [])
-        
-        local_path = get_current_db_name()
-        local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
-        
-        if not files:
-            media = MediaFileUpload(local_path, mimetype="application/octet-stream")
-            service.files().create(body={"name": BACKUP_FILENAME}, media_body=media).execute()
-            st.success("✅ Загружено в Google Drive!")
-            return True
-        else:
-            cloud_mtime = datetime.fromisoformat(
-                files[0]["modifiedTime"].replace("Z", "+00:00")
-            )
-            local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
+            files = results.get("files", [])
+            logger.info(f"   Найдено файлов: {len(files)}")
             
-            if local_mtime_aware > cloud_mtime:
+            if files:
+                logger.debug(f"   File ID: {files[0]['id']}")
+                logger.debug(f"   Modified: {files[0]['modifiedTime']}")
+        except Exception as e:
+            logger.error(f"   ❌ Ошибка поиска файла: {e}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
+            st.error(f"❌ Ошибка поиска в Drive: {e}")
+            return False
+        
+        # ШАГ 9: Определение локального файла
+        logger.info("📋 ШАГ 9: Работа с локальным файлом")
+        local_path = get_current_db_name()  # ✅ ИСПРАВЛЕНО: было loc al_path
+        logger.info(f"   Локальный путь: {local_path}")
+        
+        if not os.path.exists(local_path):
+            logger.error(f"   ❌ Локальный файл не найден: {local_path}")
+            st.error(f"❌ База данных не найдена!")
+            return False
+        
+        local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
+        logger.debug(f"   Локальное время модификации: {local_mtime}")
+        
+        # ШАГ 10: Синхронизация
+        logger.info("📋 ШАГ 10: Синхронизация файлов")
+        try:
+            if not files:
+                # Файла нет в Drive - загружаем
+                logger.info("   📤 Файл не найден в Drive, загружаем")
+                logger.debug(f"   Загружаем файл: {local_path}")
+                
                 media = MediaFileUpload(local_path, mimetype="application/octet-stream")
-                service.files().update(
-                    fileId=files[0]["id"], media_body=media
+                logger.debug("   Создаём MediaFileUpload")
+                
+                file_metadata = {"name": BACKUP_FILENAME}
+                logger.debug(f"   Метаданные: {file_metadata}")
+                
+                uploaded_file = service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
                 ).execute()
-                st.success("✅ Обновлено в Google Drive!")
+                
+                logger.info(f"   ✅ Файл загружен! ID: {uploaded_file.get('id')}")
+                st.success("✅ Загружено в Google Drive!")
+                return True
             else:
-                request = service.files().get_media(fileId=files[0]["id"])
-                temp_path = local_path + ".temp"
-                with open(temp_path, "wb") as f:
-                    downloader = MediaIoBaseDownload(f, request)
-                    done = False
-                    while not done:
-                        status, done = downloader.next_chunk()
-                shutil.copy2(temp_path, local_path)
-                os.remove(temp_path)
-                st.success("✅ Скачано из Google Drive!")
-                st.cache_data.clear()
-                st.rerun()
-            return True
+                # Файл есть - сравниваем даты
+                logger.info("   🔄 Файл найден в Drive, сравниваем версии")
+                
+                cloud_mtime = datetime.fromisoformat(
+                    files[0]["modifiedTime"].replace("Z", "+00:00")
+                )
+                local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
+                
+                logger.debug(f"   Локальное время (UTC): {local_mtime_aware}")
+                logger.debug(f"   Облачное время (UTC): {cloud_mtime}")
+                logger.debug(f"   Локальный новее: {local_mtime_aware > cloud_mtime}")
+                
+                if local_mtime_aware > cloud_mtime:
+                    # Локальный новее - загружаем
+                    logger.info("   📤 Локальная версия новее, загружаем в Drive")
+                    
+                    media = MediaFileUpload(local_path, mimetype="application/octet-stream")
+                    service.files().update(
+                        fileId=files[0]["id"],
+                        media_body=media
+                    ).execute()
+                    
+                    logger.info("   ✅ Файл обновлён в Drive")
+                    st.success("✅ Обновлено в Google Drive!")
+                else:
+                    # Облачный новее - скачиваем
+                    logger.info("   📥 Облачная версия новее, скачиваем")
+                    
+                    request = service.files().get_media(fileId=files[0]["id"])
+                    temp_path = local_path + ".temp"
+                    
+                    logger.debug(f"   Временный файл: {temp_path}")
+                    with open(temp_path, "wb") as f:
+                        downloader = MediaIoBaseDownload(f, request)
+                        done = False
+                        progress = 0
+                        while not done:
+                            status, done = downloader.next_chunk()  # ✅ ИСПРАВЛЕНО: было nex t_chunk()
+                            if status:
+                                new_progress = int(status.progress() * 100)
+                                if new_progress > progress:
+                                    progress = new_progress
+                                    logger.debug(f"   Прогресс загрузки: {progress}%")
+                    
+                    # Заменяем файл
+                    logger.debug(f"   Заменяем {local_path} на {temp_path}")
+                    shutil.copy2(temp_path, local_path)
+                    os.remove(temp_path)
+                    
+                    logger.info("   ✅ Файл скачан из Drive")
+                    st.success("✅ Скачано из Google Drive!")
+                    st.cache_data.clear()
+                    logger.info("   🔄 Перезагружаю страницу...")
+                    time.sleep(1)
+                    st.rerun()
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"   ❌ Ошибка синхронизации: {e}")
+            logger.error(f"   Stack trace: {traceback.format_exc()}")
+            st.error(f"❌ Ошибка синхронизации: {e}")
+            return False
         
     except Exception as e:
-        st.error(f"❌ Ошибка Google Drive: {str(e)}")
+        logger.critical(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
+        logger.critical(f"Stack trace: {traceback.format_exc()}")
+        st.error(f"❌ Критическая ошибка: {e}")
         return False
+    finally:
+        logger.info("=" * 80)
+        logger.info("🏁 ЗАВЕРШЕНИЕ СИНХРОНИЗАЦИИ")
+        logger.info("=" * 80)
 
 # ===== UI: ГЛАВНАЯ =====
 def show_main_page():
