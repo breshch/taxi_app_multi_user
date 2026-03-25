@@ -388,36 +388,47 @@ def sync_with_google_drive():
         SCOPES = ["https://www.googleapis.com/auth/drive.file"]
         BACKUP_FILENAME = "taxi_backup.db"
         
-        # 🔥 ОПРЕДЕЛЯЕМ REDIRECT_URI ДИНАМИЧЕСКИ
-        # Для Streamlit Cloud: берём из query params или используем дефолт
-        redirect_uri = st.query_params.get("redirect_uri")
-        if not redirect_uri:
-            # Определяем по хосту
-            if "streamlit.app" in st.runtime.get_instance()._server.base_url:
-                redirect_uri = "https://jetman.streamlit.app"
-            else:
-                redirect_uri = "http://localhost:8501"
+        # 🔥 ОПРЕДЕЛЯЕМ REDIRECT_URI
+        # Для Streamlit Cloud используем фиксированный URL
+        redirect_uri = "https://jetman.streamlit.app"
         
+        # Проверяем, запущены ли локально
+        if "localhost" in st.runtime.get_instance()._server.base_url if hasattr(st.runtime, 'get_instance') else False:
+            redirect_uri = "http://localhost:8501"
+        
+        # credentials.json из secrets
         if not os.path.exists("credentials.json"):
             if hasattr(st, "secrets") and "google_credentials" in st.secrets:
-                with open("credentials.json", "wb") as f:
-                    f.write(base64.b64decode(st.secrets["google_credentials"]["json_data"]))
+                try:
+                    encoded = st.secrets["google_credentials"]["json_data"]
+                    decoded = base64.b64decode(encoded)
+                    with open("credentials.json", "wb") as f:
+                        f.write(decoded)
+                    st.success("✅ credentials.json создан из secrets")
+                except Exception as e:
+                    st.error(f"❌ Ошибка secrets: {e}")
+                    return False
             else:
                 st.error("❌ credentials.json не найден!")
                 return False
         
         creds = None
         if os.path.exists("token.json"):
-            try: creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-            except: creds = None
+            try:
+                creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+            except:
+                os.remove("token.json")
+                creds = None
         
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                try: creds.refresh(Request())
-                except: creds = None
+                try:
+                    creds.refresh(Request())
+                except:
+                    creds = None
+            
             if not creds:
                 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-                # 🔥 ПЕРЕДАЁМ REDIRECT_URI ЯВНО
                 auth_url, _ = flow.authorization_url(
                     access_type="offline",
                     include_granted_scopes="true",
@@ -425,44 +436,81 @@ def sync_with_google_drive():
                     redirect_uri=redirect_uri
                 )
                 st.info("🔐 Требуется авторизация Google")
-                st.markdown(f"""
-                 <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                     <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
-                        🔐 Авторизоваться в Google Drive
-                     </a>
-                 </div>
-                 """, unsafe_allow_html=True)
-                st.warning("1. Нажмите кнопку выше\n2. Войдите под своим Gmail\n3. Разрешите доступ к Drive\n4. Вернитесь и нажмите '🔄 Обновить'")
-                if st.button("🔄 Обновить страницу"): st.rerun()
+                st.markdown(
+                    f"""
+                     <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                         <a href="{auth_url}" target="_blank" style="font-size: 1.1rem; color: #1976d2; font-weight: bold;">
+                            🔐 Авторизоваться в Google Drive
+                         </a>
+                     </div>
+                     """,
+                    unsafe_allow_html=True,
+                )
+                st.warning(
+                    "1. Нажмите кнопку выше\n"
+                    "2. Войдите под своим Gmail\n"
+                    "3. Разрешите доступ к Drive\n"
+                    "4. Вернитесь сюда и нажмите '🔄 Обновить'"
+                )
+                if st.button("🔄 Обновить", type="primary"):
+                    st.rerun()
                 return False
         
         service = build("drive", "v3", credentials=creds)
-        results = service.files().list(q=f"name='{BACKUP_FILENAME}'", spaces="drive", fields="files(id, modifiedTime)").execute()
+        
+        # Ищем файл в Drive
+        results = (
+            service.files()
+            .list(
+                q=f"name='{BACKUP_FILENAME}' and trashed=false",
+                spaces="drive",
+                fields="files(id, modifiedTime)",
+            )
+            .execute()
+        )
         files = results.get("files", [])
+        
         local_path = get_current_db_name()
-        local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path)).replace(tzinfo=timezone.utc)
+        local_mtime = datetime.fromtimestamp(os.path.getmtime(local_path))
         
         if not files:
-            service.files().create(body={"name": BACKUP_FILENAME}, media_body=MediaFileUpload(local_path)).execute()
+            # Загружаем локальный файл в Drive
+            media = MediaFileUpload(local_path, mimetype="application/octet-stream")
+            service.files().create(body={"name": BACKUP_FILENAME}, media_body=media).execute()
             st.success("✅ Загружено в Google Drive!")
+            return True
         else:
-            cloud_mtime = datetime.fromisoformat(files[0]["modifiedTime"].replace("Z", "+00:00"))
-            if local_mtime > cloud_mtime:
-                service.files().update(fileId=files[0]["id"], media_body=MediaFileUpload(local_path)).execute()
+            # Сравниваем время изменения
+            cloud_mtime = datetime.fromisoformat(
+                files[0]["modifiedTime"].replace("Z", "+00:00")
+            )
+            local_mtime_aware = local_mtime.replace(tzinfo=timezone.utc)
+            
+            if local_mtime_aware > cloud_mtime:
+                # Локальный файл новее — обновляем Drive
+                media = MediaFileUpload(local_path, mimetype="application/octet-stream")
+                service.files().update(
+                    fileId=files[0]["id"], media_body=media
+                ).execute()
                 st.success("✅ Обновлено в Google Drive!")
             else:
-                with open(local_path + ".temp", "wb") as f:
-                    downloader = MediaIoBaseDownload(f, service.files().get_media(fileId=files[0]["id"]))
+                # Drive новее — скачиваем
+                request = service.files().get_media(fileId=files[0]["id"])
+                temp_path = local_path + ".temp"
+                with open(temp_path, "wb") as f:
+                    downloader = MediaIoBaseDownload(f, request)
                     done = False
-                    while not done: _, done = downloader.next_chunk()
-                shutil.copy2(local_path + ".temp", local_path)
-                os.remove(local_path + ".temp")
+                    while not done:
+                        status, done = downloader.next_chunk()
+                shutil.copy2(temp_path, local_path)
+                os.remove(temp_path)
                 st.success("✅ Скачано из Google Drive!")
                 st.cache_data.clear()
                 st.rerun()
-        return True
+            return True
+        
     except Exception as e:
-        st.error(f"❌ Ошибка Google Drive: {e}")
+        st.error(f"❌ Ошибка Google Drive: {str(e)}")
         return False
 
 # ===== UI: ГЛАВНАЯ =====
