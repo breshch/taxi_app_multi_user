@@ -3,7 +3,68 @@ import sqlite3
 from datetime import datetime
 import pandas as pd
 import os
-from config import get_connection, rate_nal, rate_card, MOSCOW_TZ, get_current_db_name
+from typing import Optional
+
+def get_user_dir(username: str) -> str:
+    if not username:
+        return "users/default"
+    safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
+    user_dir = os.path.join("users", safe_name)
+    if not os.path.exists(user_dir):
+        os.makedirs(user_dir)
+    return user_dir
+
+def get_current_db_name(username: str) -> str:
+    if not username:
+        return "taxi_default.db"
+    safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
+    db_path = os.path.join("users", safe_name, f"taxi{safe_name}.db")
+    return db_path
+
+def get_connection(username: str):
+    conn = sqlite3.connect(get_current_db_name(username))
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS shifts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL, km INTEGER DEFAULT 0,
+        fuel_liters REAL DEFAULT 0, fuel_price REAL DEFAULT 0,
+        is_open INTEGER DEFAULT 1, opened_at TEXT, closed_at TEXT
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
+        type TEXT NOT NULL, amount REAL NOT NULL, tips REAL DEFAULT 0,
+        commission REAL NOT NULL, total REAL NOT NULL,
+        beznal_added REAL DEFAULT 0, order_time TEXT
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS extra_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER,
+        amount REAL DEFAULT 0, description TEXT, created_at TEXT
+    )
+    """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS accumulated_beznal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER DEFAULT 1,
+        total_amount REAL DEFAULT 0,
+        last_updated TEXT
+    )
+    """)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, 0, ?)",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),)
+        )
+    conn.commit()
+    return conn
+
+rate_nal = 0.78
+rate_card = 0.75
 
 @st.cache_data(ttl=300)
 def get_available_year_months_cached(username: str):

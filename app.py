@@ -760,35 +760,43 @@ def show_main_page():
 def show_reports_page():
     st.title("📊 ОТЧЁТЫ И СТАТИСТИКА")
     check_and_create_tables()
+    
+    username = st.session_state.get("username", "unknown")  # ← Добавили
+    
     try:
         from pages_imports import get_available_year_months_cached, get_month_totals_cached, format_month_option, get_month_shifts_details_cached
-        year_months = get_available_year_months_cached()
+        
+        # ← Передаём username во все функции
+        year_months = get_available_year_months_cached(username)
+        
         if not year_months:
             st.info("📭 Нет закрытых смен")
             return
-
+        
         ym = st.selectbox("📅 Выберите месяц", year_months, format_func=format_month_option, index=0)
-
-        totals = get_month_totals_cached(ym)
+        
+        # ← Передаём username
+        totals = get_month_totals_cached(username, ym)
         st.subheader("💰 ИТОГИ ЗА МЕСЯЦ")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("💵 Нал", f"{totals.get('нал', 0):.0f} ₽")
         col2.metric("💳 Карта", f"{totals.get('карта', 0):.0f} ₽")
         col3.metric("💝 Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
         col4.metric("📊 ВСЕГО", f"{totals.get('всего', 0):.0f} ₽")
-
+        
         st.divider()
-
+        
         st.subheader("📋 ОТЧЁТЫ ПО ДНЯМ")
-        df_shifts = get_month_shifts_details_cached(ym)
+        # ← Передаём username
+        df_shifts = get_month_shifts_details_cached(username, ym)
         if not df_shifts.empty:
             dates = df_shifts["Дата"].unique().tolist()
             selected_date = st.selectbox("📆 Выберите день", options=dates)
-
+            
             df_day = df_shifts[df_shifts["Дата"] == selected_date].copy()
             if not df_day.empty:
                 st.dataframe(df_day, width="stretch")
-
+                
                 row = df_day.iloc[0]
                 st.divider()
                 st.subheader("📊 ИТОГИ ЗА ДЕНЬ")
@@ -799,23 +807,24 @@ def show_reports_page():
                 c3.metric("📈 Чистыми", f"{row['Всего'] - fuel_cost:.0f}₽")
         else:
             st.info("📭 Нет данных за этот месяц")
-
+        
         st.divider()
-
+        
         from pages_imports import get_month_statistics
-        stats = get_month_statistics(ym)
+        # ← Передаём username
+        stats = get_month_statistics(username, ym)
         st.subheader("📈 СТАТИСТИКА ЗА МЕСЯЦ")
         c1, c2, c3 = st.columns(3)
         c1.metric("📅 Смен", f"{stats.get('смен', 0)}")
         c2.metric("📝 Заказов", f"{stats.get('заказов', 0)}")
         c3.metric("💰 Средний чек", f"{stats.get('средний_чек', 0):.0f} ₽")
-
+        
         c1, c2, c3 = st.columns(3)
         c1.metric("⛽ Бензин", f"{stats.get('бензин', 0):.0f} ₽")
         c2.metric("💸 Расходы", f"{stats.get('расходы', 0):.0f} ₽")
         profit = stats.get('прибыль', 0)
         c3.metric("📈 Прибыль", f"{profit:.0f} ₽", delta=f"{stats.get('рентабельность', 0):.1f}%" if profit > 0 else None)
-
+        
     except Exception as e:
         st.error(f"Ошибка: {e}")
         st.exception(e)
@@ -839,15 +848,17 @@ def show_admin_page():
 
         with tabs[1]:
             from pages_imports import recalc_full_db, get_accumulated_beznal
+            username = st.session_state.get("username", "unknown")  # ← Добавили
             if st.button("🔄 Пересчитать", width="stretch"):
-                new_total = recalc_full_db()
+                new_total = recalc_full_db(username)  # ← Передаём username
                 st.success(f"Готово. Безнал: {new_total:.0f} ₽")
 
         with tabs[2]:
-            curr = get_accumulated_beznal()
+            username = st.session_state.get("username", "unknown")  # ← Добавили
+            curr = get_accumulated_beznal(username)  # ← Передаём username
             new_val = st.number_input("Значение", value=float(curr))
             if st.button("💾 Сохранить", width="stretch"):
-                set_accumulated_beznal(new_val)
+                set_accumulated_beznal(new_val)  # ← Эта функция тоже должна принимать username
                 st.success("Сохранено"); st.rerun()
 
         with tabs[3]:
@@ -880,7 +891,8 @@ def show_admin_page():
         with tabs[6]:
             if st.button("🗑 Сброс", width="stretch"):
                 from pages_imports import reset_db
-                reset_db()
+                username = st.session_state.get("username", "unknown")  # ← Добавили
+                reset_db(username)  # ← Передаём username
                 st.success("Сброшено"); st.rerun()
 
 # ===== ЗАПУСК =====
