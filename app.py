@@ -388,9 +388,6 @@ def sync_with_google_drive():
         SCOPES = ["https://www.googleapis.com/auth/drive.file"]
         BACKUP_FILENAME = "taxi_backup.db"
         
-        # 🔥 ФИКСИРОВАННЫЙ REDIRECT_URI для Streamlit Cloud
-        redirect_uri = "https://jetman.streamlit.app"
-        
         # credentials.json из secrets
         if not os.path.exists("credentials.json"):
             if hasattr(st, "secrets") and "google_credentials" in st.secrets:
@@ -423,12 +420,17 @@ def sync_with_google_drive():
                     creds = None
             
             if not creds:
-                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+                # 🔥 ВАЖНО: redirect_uri передаём ТОЛЬКО здесь!
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    "credentials.json",
+                    SCOPES,
+                    redirect_uri="https://jetman.streamlit.app"
+                )
+                # 🔥 НЕ передавать redirect_uri в authorization_url!
                 auth_url, _ = flow.authorization_url(
                     access_type="offline",
                     include_granted_scopes="true",
-                    prompt="consent",
-                    redirect_uri=redirect_uri
+                    prompt="consent"
                 )
                 st.info("🔐 Требуется авторизация Google")
                 st.markdown(
