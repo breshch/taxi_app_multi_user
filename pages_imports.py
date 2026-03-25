@@ -20,7 +20,8 @@ def get_current_db_name() -> str:
     if not username:
         return "taxi_default.db"
     safe_name = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
-    return os.path.join(get_user_dir(username), f"taxi{safe_name}.db")
+    db_path = os.path.join("users", safe_name, f"taxi{safe_name}.db")
+    return db_path
 
 def get_connection():
     conn = sqlite3.connect(get_current_db_name())
