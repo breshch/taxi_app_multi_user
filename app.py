@@ -884,7 +884,7 @@ def show_admin_page():
     st.title("🛠 АДМИНКА")
     pwd = st.text_input("Пароль админа", type="password")
     if st.button("🔓 Войти", width="stretch"):
-        if pwd == st.secrets.get("ADMIN_PASSWORD", "changeme"):
+        if pwd == st.secrets.get("ADMIN_PASSWORD", "5484"):
             st.session_state.admin_auth = True
             st.rerun()
         else:
