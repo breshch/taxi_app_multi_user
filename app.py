@@ -558,7 +558,7 @@ def sync_with_google_drive():
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
         
-        # === СОЗДАЁМ credentials.json ИЗ SECRETS ===
+        # Создаём credentials.json из secrets
         if not os.path.exists('credentials.json'):
             if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
                 try:
@@ -576,24 +576,69 @@ def sync_with_google_drive():
                 st.code('[google_credentials]\njson_data = "ваш_base64_код"', language='toml')
                 return False
         
-        # === АВТОРИЗАЦИЯ ===
         creds = None
         if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+            try:
+                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+            except:
+                os.remove('token.json')
+                creds = None
         
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+                try:
+                    creds.refresh(Request())
+                except:
+                    creds = None
             else:
+                # Создаём flow для авторизации
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0, open_browser=True)
-            
-            with open('token.json', 'w', encoding='utf-8') as token:
-                token.write(creds.to_json())
-            st.success("✅ Авторизация успешна! Токен сохранён.")
-            st.rerun()
-
-        # === СИНХРОНИЗАЦИЯ ===
+                
+                # Для Streamlit Cloud - показываем ссылку для ручной авторизации
+                st.info("📋 **Нажмите на ссылку ниже для авторизации в Google:**")
+                
+                # Генерируем URL авторизации
+                authorization_url, _ = flow.authorization_url(
+                    access_type='offline',
+                    include_granted_scopes='true',
+                    prompt='consent'
+                )
+                
+                st.markdown(f"""
+                <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
+                    <a href='{authorization_url}' target='_blank' style='font-size: 1.1rem; color: #1976d2; font-weight: bold;'>
+                        🔗 Открыть страницу авторизации Google
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.warning("""
+                **Инструкция:**
+                1. Нажмите на ссылку выше
+                2. Выберите ваш Google аккаунт
+                3. Предоставьте доступ к Google Drive
+                4. Скопируйте код авторизации (если потребуется)
+                5. Вернитесь на эту страницу
+                """)
+                
+                # Поле для ввода кода авторизации (если требуется)
+                auth_code = st.text_input("📝 Введите код авторизации (если запросили):")
+                
+                if auth_code:
+                    try:
+                        flow.fetch_token(code=auth_code)
+                        creds = flow.credentials
+                        
+                        with open('token.json', 'w', encoding='utf-8') as token:
+                            token.write(creds.to_json())
+                        st.success("✅ Авторизация успешна! Токен сохранён.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Ошибка авторизации: {e}")
+                
+                st.stop()
+        
+        # Если авторизация успешна - продолжаем синхронизацию
         service = build('drive', 'v3', credentials=creds)
         results = service.files().list(
             q=f"name='{BACKUP_FILENAME}' and trashed=false",
@@ -644,7 +689,6 @@ def sync_with_google_drive():
     except Exception as e:
         st.error(f"❌ Ошибка синхронизации: {str(e)}")
         return False
-
 
 # ===== СТРАНИЦЫ =====
 def show_main_page():
