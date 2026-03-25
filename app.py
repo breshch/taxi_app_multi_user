@@ -7,7 +7,6 @@ import pandas as pd
 import shutil
 import json
 from pathlib import Path
-import base64
 
 # ===== НАСТРОЙКИ =====
 AUTH_DB = "users.db"
@@ -32,6 +31,9 @@ def apply_mobile_optimized_css():
     * { box-sizing: border-box; }
     .main > div { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
     .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; max-width: 100% !important; }
+    .user-info { display: flex; flex-direction: column; align-items: center; gap: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px; }
+    .user-avatar { font-size: 4rem; width: 100px; height: 100px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; box-shadow: 0 4px 15px rgba(0,0,0,0.3); margin: 0 auto; }
+    .user-name { font-size: 1.8rem; font-weight: bold; color: white; text-align: center; }
     .stButton > button { width: 100%; min-height: 48px; }
     </style>
     """, unsafe_allow_html=True)
@@ -420,75 +422,28 @@ def sync_with_google_drive():
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         BACKUP_FILENAME = 'taxi_backup.db'
         
-        # Создаём credentials.json из secrets
         if not os.path.exists('credentials.json'):
-            if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
-                try:
-                    encoded = st.secrets['google_credentials']['json_data']
-                    decoded = base64.b64decode(encoded)
-                    with open('credentials.json', 'wb') as f:
-                        f.write(decoded)
-                    st.success("✅ credentials.json создан из secrets")
-                except Exception as e:
-                    st.error(f"❌ Ошибка: {e}")
-                    return False
-            else:
-                st.error("❌ credentials.json не найден!")
-                return False
+            st.error("❌ Файл credentials.json не найден!")
+            return False
         
         creds = None
         if os.path.exists('token.json'):
-            try:
-                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-            except:
-                os.remove('token.json')
-                creds = None
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except:
-                    creds = None
-            
-            if not creds:
+                creds.refresh(Request())
+            else:
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                
-                # Генерируем URL авторизации
-                auth_url, _ = flow.authorization_url(
-                    access_type='offline',
-                    include_granted_scopes='true',
-                    prompt='consent'
-                )
-                
-                st.info("🔐 Требуется авторизация в Google")
-                st.markdown(f"""
-                <div style='background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
-                    <a href='{auth_url}' target='_blank' style='font-size: 1.1rem; color: #1976d2; font-weight: bold;'>
-                        🔗 Открыть страницу авторизации Google
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.warning("""
-                **Инструкция:**
-                1. Нажмите на ссылку выше
-                2. Выберите аккаунт
-                3. Разрешите доступ к Google Drive
-                4. Вернитесь сюда и обновите страницу
-                """)
-                
-                if st.button("🔄 Обновить после авторизации"):
-                    st.rerun()
-                return False
-        
-        # Синхронизация
+                creds = flow.run_local_server(port=0, open_browser=True)
+            
+            with open('token.json', 'w', encoding='utf-8') as token:
+                token.write(creds.to_json())
+            st.success("✅ Авторизация успешна! Токен сохранён.")
+            st.rerun()
+
         service = build('drive', 'v3', credentials=creds)
-        results = service.files().list(
-            q=f"name='{BACKUP_FILENAME}' and trashed=false",
-            spaces='drive',
-            fields='files(id, modifiedTime)'
-        ).execute()
+        results = service.files().list(q=f"name='{BACKUP_FILENAME}' and trashed=false", spaces='drive', fields='files(id, modifiedTime)').execute()
         files = results.get('files', [])
         
         local_path = get_current_db_name()
@@ -523,7 +478,7 @@ def sync_with_google_drive():
                 st.rerun()
                 
     except Exception as e:
-        st.error(f"❌ Ошибка: {str(e)}")
+        st.error(f"❌ Ошибка синхронизации: {str(e)}")
         return False
 
 # ===== СТРАНИЦЫ =====
@@ -577,6 +532,7 @@ def show_main_page():
             st.divider()
             st.metric("ДОХОД", f"{totals.get('нал',0)+totals.get('карта',0)+totals.get('чаевые',0):.0f}₽")
 
+        # ===== ДОП ЗАТРАТЫ =====
         with st.expander("💸 ДОП ЗАТРАТЫ", expanded=False):
             st.subheader("➕ Добавить расход")
             c1, c2, c3 = st.columns([2, 1, 1])
@@ -607,6 +563,7 @@ def show_main_page():
                 st.divider()
                 st.metric("💸 ИТОГО РАСХОДЫ", f"{total_extra:.0f}₽")
         
+        # ===== ИТОГИ СМЕНЫ =====
         st.divider()
         st.subheader("💰 ИТОГИ СМЕНЫ")
         total_income = totals.get('нал',0)+totals.get('карта',0)+totals.get('чаевые',0)
@@ -616,6 +573,7 @@ def show_main_page():
         col2.metric("💸 Расходы", f"{total_extra:.0f}₽")
         col3.metric("📈 Чистыми", f"{total_income - total_extra:.0f}₽", delta=f"{total_income - total_extra:.0f}₽")
         
+        # ===== ЗАКРЫТЬ СМЕНУ =====
         with st.expander("🔒 ЗАКРЫТЬ СМЕНУ", expanded=False):
             last_cons, last_price = get_last_fuel_params()
             km = st.number_input("Пробег (км)", value=100, key="km_close")
@@ -642,15 +600,15 @@ def show_reports_page():
     check_and_create_tables()
     try:
         from pages_imports import get_available_year_months_cached, get_month_totals_cached, format_month_option, get_month_shifts_details_cached
-        username = st.session_state.get("username", "unknown")
-        year_months = get_available_year_months_cached(username)
+        year_months = get_available_year_months_cached()
         if not year_months:
             st.info("📭 Нет закрытых смен")
             return
         
         ym = st.selectbox("📅 Выберите месяц", year_months, format_func=format_month_option, index=0)
         
-        totals = get_month_totals_cached(username, ym)
+        # ИТОГИ ЗА МЕСЯЦ
+        totals = get_month_totals_cached(ym)
         st.subheader("💰 ИТОГИ ЗА МЕСЯЦ")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("💵 Нал", f"{totals.get('нал', 0):.0f} ₽")
@@ -660,12 +618,15 @@ def show_reports_page():
         
         st.divider()
         
+        # ДЕТАЛИ ПО СМЕНАМ (ОТЧЁТЫ ЗА ДЕНЬ)
         st.subheader("📋 ОТЧЁТЫ ПО ДНЯМ")
-        df_shifts = get_month_shifts_details_cached(username, ym)
+        df_shifts = get_month_shifts_details_cached(ym)
         if not df_shifts.empty:
+            # Выбор дня
             dates = df_shifts["Дата"].unique().tolist()
             selected_date = st.selectbox("📆 Выберите день", options=dates)
             
+            # Фильтр по дню
             df_day = df_shifts[df_shifts["Дата"] == selected_date].copy()
             if not df_day.empty:
                 st.dataframe(df_day, width="stretch")
@@ -683,8 +644,9 @@ def show_reports_page():
         
         st.divider()
         
+        # СТАТИСТИКА
         from pages_imports import get_month_statistics
-        stats = get_month_statistics(username, ym)
+        stats = get_month_statistics(ym)
         st.subheader("📈 СТАТИСТИКА ЗА МЕСЯЦ")
         c1, c2, c3 = st.columns(3)
         c1.metric("📅 Смен", f"{stats.get('смен', 0)}")
@@ -705,8 +667,7 @@ def show_admin_page():
     st.title("🛠 АДМИНКА")
     pwd = st.text_input("Пароль админа", type="password")
     if st.button("🔓 Войти", width="stretch"):
-        admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
-        if pwd == admin_pwd:
+        if pwd == st.secrets.get("ADMIN_PASSWORD", "changeme"):
             st.session_state.admin_auth = True
             st.rerun()
         else:
@@ -720,14 +681,12 @@ def show_admin_page():
         
         with tabs[1]:
             from pages_imports import recalc_full_db, get_accumulated_beznal
-            username = st.session_state.get("username", "unknown")
             if st.button("🔄 Пересчитать", width="stretch"):
-                new_total = recalc_full_db(username)
+                new_total = recalc_full_db()
                 st.success(f"Готово. Безнал: {new_total:.0f} ₽")
         
         with tabs[2]:
-            username = st.session_state.get("username", "unknown")
-            curr = get_accumulated_beznal(username)
+            curr = get_accumulated_beznal()
             new_val = st.number_input("Значение", value=float(curr))
             if st.button("💾 Сохранить", width="stretch"):
                 set_accumulated_beznal(new_val)
@@ -756,15 +715,14 @@ def show_admin_page():
 
         with tabs[5]:
             st.subheader("☁️ Google Drive Синхронизация")
-            st.info("Нажмите кнопку ниже для авторизации в Google.")
+            st.info("Нажмите кнопку ниже. Откроется окно браузера для входа в Google.")
             if st.button("🔄 Синхронизировать", width="stretch", type="primary"):
                 sync_with_google_drive()
         
         with tabs[6]:
             if st.button("🗑 Сброс", width="stretch"):
                 from pages_imports import reset_db
-                username = st.session_state.get("username", "unknown")
-                reset_db(username)
+                reset_db()
                 st.success("Сброшено"); st.rerun()
 
 # ===== ЗАПУСК =====
@@ -797,13 +755,13 @@ if "username" not in st.session_state:
             st.error("Ошибка")
     st.stop()
 
-# ===== SIDEBAR =====
+# ===== ЛЕВАЯ ПАНЕЛЬ (SIDEBAR) =====
 with st.sidebar:
     st.markdown(f"""
     <div style="text-align: center; padding: 20px 0;">
         <div style="font-size: 4rem; margin-bottom: 10px;">🚕</div>
         <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 5px;">{st.session_state['username']}</div>
-        <div style="color: #64748b; font-size: 0.9rem;">👨‍💼 водитель</div>
+        <div style="color: #64748b; font-size: 0.9rem;">👨‍ водитель</div>
     </div>
     """, unsafe_allow_html=True)
     
