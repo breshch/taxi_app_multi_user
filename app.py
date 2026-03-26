@@ -27,15 +27,11 @@ POPULAR_EXPENSES = [
 def apply_mobile_css():
     st.markdown("""
     <style>
-    /* Скрываем боковую панель полностью */
-    [data-testid="stSidebar"] { display: none !important; }
-    [data-testid="collapsedControl"] { display: none !important; }
-
-    /* Убираем лишние отступы */
-    .main > div { padding: 0.5rem !important; padding-bottom: 80px !important; }
+    /* Убираем лишние отступы основного контента */
+    .main > div { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
     .block-container {
-        padding: 0.5rem !important;
-        padding-bottom: 80px !important;
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
         max-width: 100% !important;
     }
 
@@ -55,37 +51,6 @@ def apply_mobile_css():
         border-radius: 10px !important;
     }
 
-    /* Нижняя навигация — фиксированная */
-    .bottom-nav {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: #1e293b;
-        display: flex;
-        z-index: 9999;
-        padding: 4px 0;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
-    }
-    .nav-btn {
-        flex: 1;
-        background: none;
-        border: none;
-        color: #94a3b8;
-        padding: 8px 4px;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 2px;
-        font-size: 0.65rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        transition: color 0.2s;
-    }
-    .nav-btn.active { color: #38bdf8 !important; }
-    .nav-btn span.icon { font-size: 1.4rem; }
-
     /* Карточки метрик */
     [data-testid="metric-container"] {
         background: #f8fafc;
@@ -94,9 +59,9 @@ def apply_mobile_css():
         border: 1px solid #e2e8f0;
     }
 
-    /* Заголовок страницы */
-    h1 { font-size: 1.4rem !important; margin-bottom: 0.5rem !important; }
-    h2 { font-size: 1.2rem !important; }
+    /* Заголовки */
+    h1 { font-size: 1.5rem !important; margin-bottom: 0.5rem !important; }
+    h2 { font-size: 1.3rem !important; }
     h3 { font-size: 1.1rem !important; }
 
     /* Компактные разделители */
@@ -109,36 +74,6 @@ def apply_mobile_css():
     footer { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
-
-
-def render_bottom_nav(current_page: str):
-    """Нижняя навигационная панель в мобильном стиле."""
-    pages = [
-        ("main",    "🏠", "Главная"),
-        ("reports", "📊", "Отчёты"),
-        ("admin",   "🔧", "Настройки"),
-    ]
-    buttons_html = ""
-    for key, icon, label in pages:
-        active = "active" if current_page == key else ""
-        buttons_html += f"""
-        <button class="nav-btn {active}" onclick="
-            var inputs = window.parent.document.querySelectorAll('input[type=hidden]');
-            " data-page="{key}">
-            <span class="icon">{icon}</span>{label}
-        </button>"""
-
-    # Streamlit не даёт JS навигацию напрямую, используем кнопки через columns
-    cols = st.columns(3)
-    labels = [("🏠 Главная", "main"), ("📊 Отчёты", "reports"), ("🔧 Настройки", "admin")]
-    for i, (col, (label, page_key)) in enumerate(zip(cols, labels)):
-        btn_type = "primary" if current_page == page_key else "secondary"
-        if col.button(label, key=f"nav_{page_key}", type=btn_type, use_container_width=True):
-            st.session_state.page = page_key
-            st.rerun()
-
-    # Разделитель + отступ снизу чтобы контент не перекрывался кнопками
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 
 # ===== СЕССИЯ =====
@@ -575,8 +510,18 @@ def upload_and_restore_backup(file) -> bool:
 
 # ===== ЯНДЕКС ДИСК БЭКАП (REST API) =====
 YADISK_API = "https://cloud-api.yandex.net/v1/disk"
-YADISK_BACKUP_PATH = "disk:/taxi_backup/taxi_backup.db"
-YADISK_BACKUP_DIR_PATH = "disk:/taxi_backup"
+YADISK_ROOT = "disk:/jet"          # корневая папка
+
+
+def _yadisk_backup_path(username: str, date_str: str) -> str:
+    """Путь файла: disk:/jet/<username>/backup_<date>.db"""
+    safe = "".join(c for c in username if c.isalnum() or c in ("_", "-")) or "user"
+    return f"{YADISK_ROOT}/{safe}/backup_{date_str}.db"
+
+
+def _yadisk_user_dir(username: str) -> str:
+    safe = "".join(c for c in username if c.isalnum() or c in ("_", "-")) or "user"
+    return f"{YADISK_ROOT}/{safe}"
 
 
 def get_yadisk_token() -> str:
@@ -617,8 +562,8 @@ def _yadisk_api(method: str, url: str, token: str,
             return code, {"message": str(e)}
 
 
-def yadisk_upload_backup(token: str) -> bool:
-    """Загружает .db файл на Яндекс Диск через REST API."""
+def yadisk_upload_backup(token: str, shift_date: str = None) -> bool:
+    """Загружает .db файл на Яндекс Диск: jet/<user>/backup_<date>.db"""
     import urllib.request
     db_path = get_current_db_name()
     if not os.path.exists(db_path):
@@ -628,14 +573,20 @@ def yadisk_upload_backup(token: str) -> bool:
         st.error("❌ Не задан токен Яндекс Диска")
         return False
 
-    # Создаём папку (игнорируем ошибку если уже существует)
-    _yadisk_api("PUT", f"{YADISK_API}/resources", token,
-                params={"path": YADISK_BACKUP_DIR_PATH})
+    username = st.session_state.get("username", "unknown")
+    date_str = shift_date or datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    remote_path = _yadisk_backup_path(username, date_str)
+    user_dir = _yadisk_user_dir(username)
+
+    # Создаём папки: сначала jet/, потом jet/<user>/
+    for folder in [YADISK_ROOT, user_dir]:
+        _yadisk_api("PUT", f"{YADISK_API}/resources", token,
+                    params={"path": folder})
 
     # Получаем URL для загрузки
     status, resp = _yadisk_api(
         "GET", f"{YADISK_API}/resources/upload", token,
-        params={"path": YADISK_BACKUP_PATH, "overwrite": "true"}
+        params={"path": remote_path, "overwrite": "true"}
     )
     if status != 200:
         msg = resp.get("message", str(resp)) if isinstance(resp, dict) else str(resp)
@@ -647,34 +598,73 @@ def yadisk_upload_backup(token: str) -> bool:
         st.error("❌ Яндекс не вернул URL для загрузки")
         return False
 
-    # Загружаем файл по подписанному URL (без заголовка авторизации)
     with open(db_path, "rb") as f:
         db_bytes = f.read()
+
     req = urllib.request.Request(upload_url, data=db_bytes, method="PUT")
     req.add_header("Content-Type", "application/octet-stream")
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
-            return r.status in (200, 201, 202, 204)
+            ok = r.status in (200, 201, 202, 204)
+            return ok
     except Exception as e:
         code = getattr(e, "code", 0)
         st.error(f"❌ Ошибка загрузки файла (код {code}): {e}")
         return False
 
 
-def yadisk_download_backup(token: str) -> bool:
-    """Скачивает .db файл с Яндекс Диска через REST API."""
+def yadisk_list_backups(token: str) -> list:
+    """Возвращает список бэкапов текущего пользователя на Яндекс Диске."""
+    if not token:
+        return []
+    username = st.session_state.get("username", "unknown")
+    user_dir = _yadisk_user_dir(username)
+    status, resp = _yadisk_api(
+        "GET", f"{YADISK_API}/resources", token,
+        params={"path": user_dir, "limit": 100, "fields": "_embedded.items.name,_embedded.items.path,_embedded.items.modified,_embedded.items.size"}
+    )
+    if status != 200:
+        return []
+    items = resp.get("_embedded", {}).get("items", []) if isinstance(resp, dict) else []
+    result = []
+    for item in items:
+        if item.get("name", "").endswith(".db"):
+            modified = item.get("modified", "")
+            try:
+                dt = datetime.fromisoformat(modified.replace("Z", "+00:00"))
+                modified = dt.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y %H:%M")
+            except Exception:
+                pass
+            result.append({
+                "name": item["name"],
+                "path": item["path"],
+                "modified": modified,
+                "size_kb": (item.get("size") or 0) // 1024,
+            })
+    return sorted(result, key=lambda x: x["name"], reverse=True)
+
+
+def yadisk_download_backup(token: str, remote_path: str = None) -> bool:
+    """Скачивает указанный (или последний) бэкап с Яндекс Диска."""
     import urllib.request
     if not token:
         st.error("❌ Не задан токен Яндекс Диска")
         return False
 
-    # Получаем URL для скачивания
+    # Если путь не указан — берём последний файл пользователя
+    if not remote_path:
+        backups = yadisk_list_backups(token)
+        if not backups:
+            st.warning("⚠️ Нет бэкапов на Яндекс Диске")
+            return False
+        remote_path = backups[0]["path"]
+
     status, resp = _yadisk_api(
         "GET", f"{YADISK_API}/resources/download", token,
-        params={"path": YADISK_BACKUP_PATH}
+        params={"path": remote_path}
     )
     if status == 404:
-        st.warning("⚠️ Файл не найден на Яндекс Диске — сначала сделайте загрузку")
+        st.warning("⚠️ Файл не найден на Яндекс Диске")
         return False
     if status != 200:
         msg = resp.get("message", str(resp)) if isinstance(resp, dict) else str(resp)
@@ -694,7 +684,7 @@ def yadisk_download_backup(token: str) -> bool:
         return False
 
     if len(db_bytes) < 100:
-        st.error("❌ Скачанный файл слишком мал, возможно повреждён")
+        st.error("❌ Скачанный файл слишком мал")
         return False
 
     db_path = get_current_db_name()
@@ -719,22 +709,13 @@ def yadisk_download_backup(token: str) -> bool:
 
 
 def yadisk_get_backup_info(token: str) -> dict:
-    """Получает информацию о файле бэкапа через REST API."""
+    """Возвращает инфо о последнем бэкапе пользователя."""
     if not token:
         return {}
-    status, resp = _yadisk_api(
-        "GET", f"{YADISK_API}/resources", token,
-        params={"path": YADISK_BACKUP_PATH, "fields": "modified,size"}
-    )
-    if status == 200 and isinstance(resp, dict):
-        size_kb = (resp.get("size") or 0) // 1024
-        modified = resp.get("modified", "")
-        try:
-            dt = datetime.fromisoformat(modified.replace("Z", "+00:00"))
-            modified = dt.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y %H:%M")
-        except Exception:
-            pass
-        return {"modified": modified, "size_kb": size_kb}
+    backups = yadisk_list_backups(token)
+    if backups:
+        b = backups[0]
+        return {"modified": b["modified"], "size_kb": b["size_kb"], "name": b["name"]}
     return {}
 
 
@@ -993,6 +974,18 @@ def show_main_page():
                 close_shift_db(shift_id, km, liters_val, price)
                 st.session_state.pop("confirm_close", None)
                 st.cache_data.clear()
+                # Автобэкап на Яндекс Диск после закрытия смены
+                token = get_yadisk_token()
+                if token:
+                    try:
+                        if yadisk_upload_backup(token, shift_date=date_str):
+                            st.success(f"✅ Смена закрыта. Бэкап сохранён на Яндекс Диск (jet/{st.session_state.get('username')}/backup_{date_str}.db)")
+                        else:
+                            st.warning("⚠️ Смена закрыта, но бэкап на Яндекс Диск не удался")
+                    except Exception as e:
+                        st.warning(f"⚠️ Смена закрыта, ошибка бэкапа: {e}")
+                else:
+                    st.success("✅ Смена закрыта")
                 st.rerun()
             if c2.button("❌ Отмена", use_container_width=True):
                 st.session_state.pop("confirm_close", None)
@@ -1158,26 +1151,20 @@ def show_admin_page():
     # ===== TAB 2: ЯНДЕКС ДИСК =====
     with tab2:
         st.markdown("### ☁️ Яндекс Диск")
-        st.info("Бэкап через WebDAV — не нужны OAuth и сторонние библиотеки. Только токен.")
+        st.info("Бэкап автоматически создаётся при закрытии каждой смены.\nСтруктура: `jet/<пользователь>/backup_<дата>.db`")
 
         with st.expander("ℹ️ Как получить токен", expanded=False):
             st.markdown("""
-**1. Получите OAuth-токен Яндекс Диска:**
-
-Перейдите по ссылке — она сразу выдаст токен:
+**1. Перейдите по ссылке** (подставьте ваш ClientID):
 ```
-https://oauth.yandex.ru/authorize?response_type=token&client_id=72294e73f3934c7ea3e416e4e46b04eb
+https://oauth.yandex.ru/authorize?response_type=token&client_id=ВАШ_CLIENT_ID
 ```
-*(Это стандартный клиент WebDAV от Яндекса)*
+**2.** После входа скопируйте `access_token=...` из адресной строки
 
-**2. Скопируйте токен** из строки `access_token=...` в URL
-
-**3. Вставьте токен ниже** или добавьте в `.streamlit/secrets.toml`:
+**3.** Добавьте в `.streamlit/secrets.toml`:
 ```toml
-YADISK_TOKEN = "AgAAAAAxxxx..."
+YADISK_TOKEN = "y0_AgAAAA..."
 ```
-
-Файл будет сохранён в `/taxi_backup/taxi_backup.db` на вашем Яндекс Диске.
             """)
 
         saved_token = get_yadisk_token()
@@ -1185,42 +1172,58 @@ YADISK_TOKEN = "AgAAAAAxxxx..."
             "🔑 OAuth-токен Яндекс Диска",
             value=saved_token,
             type="password",
-            placeholder="AgAAAAAxxxx...",
+            placeholder="y0_AgAAAA...",
             key="input_yd_token"
         )
-        if st.button("💾 Сохранить токен в сессии", use_container_width=True):
+        if st.button("💾 Сохранить токен", use_container_width=True):
             st.session_state.yadisk_token = yd_token.strip()
             st.success("✅ Токен сохранён до перезапуска")
-
-        # Показываем статус файла на диске
-        cur_token = get_yadisk_token()
-        if cur_token:
-            info = yadisk_get_backup_info(cur_token)
-            if info:
-                st.success(f"✅ Файл найден на Яндекс Диске | "
-                           f"Изменён: {info.get('modified', '?')} | "
-                           f"Размер: {info.get('size_kb', 0)} KB")
-            else:
-                st.warning("⚠️ Файл не найден на Яндекс Диске (или токен неверный)")
 
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📤 Загрузить на Яндекс Диск", use_container_width=True, type="primary"):
+            if st.button("📤 Загрузить бэкап сейчас", use_container_width=True, type="primary"):
                 tok = get_yadisk_token()
                 with st.spinner("Загружаю..."):
-                    if yadisk_upload_backup(tok):
-                        st.success("✅ Бэкап загружен на Яндекс Диск!")
+                    date_str = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+                    if yadisk_upload_backup(tok, shift_date=date_str):
+                        st.success(f"✅ Бэкап загружен!\nФайл: backup_{date_str}.db")
         with col2:
-            if st.button("📥 Скачать с Яндекс Диска", use_container_width=True):
+            if st.button("📥 Восстановить последний", use_container_width=True):
                 tok = get_yadisk_token()
                 with st.spinner("Скачиваю..."):
                     try:
                         if yadisk_download_backup(tok):
-                            st.success("✅ База восстановлена с Яндекс Диска!")
+                            st.success("✅ База восстановлена!")
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
+
+        # Список бэкапов пользователя
+        st.divider()
+        st.markdown("**📋 Бэкапы на Яндекс Диске:**")
+        tok = get_yadisk_token()
+        if tok:
+            with st.spinner("Загружаю список..."):
+                backups = yadisk_list_backups(tok)
+            if backups:
+                for b in backups:
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    c1.markdown(f"📄 **{b['name']}**  \n📅 {b['modified']} · {b['size_kb']} KB")
+                    if c2.button("📥", key=f"yd_dl_{b['name']}", use_container_width=True,
+                                 help="Восстановить из этого бэкапа"):
+                        with st.spinner("Восстанавливаю..."):
+                            try:
+                                if yadisk_download_backup(tok, remote_path=b["path"]):
+                                    st.success(f"✅ Восстановлено из {b['name']}!")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ {e}")
+                    c3.markdown(f"`{b['name']}`", help=b["path"])
+            else:
+                st.info("Бэкапов нет. Они появятся после закрытия первой смены.")
+        else:
+            st.warning("⚠️ Введите токен чтобы увидеть список бэкапов")
 
     # ===== TAB 3: БЕЗНАЛ =====
     with tab3:
@@ -1263,12 +1266,6 @@ YADISK_TOKEN = "AgAAAAAxxxx..."
             else:
                 st.error("❌ Введите слово СБРОС")
 
-    st.divider()
-    if st.button("👋 Выйти из системы", use_container_width=True):
-        clear_session_disk()
-        st.session_state.clear()
-        st.rerun()
-
 
 # ===== MAIN =====
 if __name__ == "__main__":
@@ -1276,7 +1273,7 @@ if __name__ == "__main__":
         page_title="Taxi Shift Manager",
         page_icon="🚕",
         layout="wide",
-        initial_sidebar_state="collapsed"
+        initial_sidebar_state="expanded"
     )
     apply_mobile_css()
     init_auth_db()
@@ -1295,16 +1292,47 @@ if __name__ == "__main__":
         show_login_page()
         st.stop()
 
+    # ===== БОКОВАЯ НАВИГАЦИЯ =====
+    with st.sidebar:
+        st.markdown(f"""
+        <div style="text-align:center; padding: 1rem 0;">
+            <div style="font-size:3rem;">🚕</div>
+            <div style="font-size:1.3rem; font-weight:bold;">{st.session_state.username}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Безнал и размер БД
+        try:
+            acc = get_accumulated_beznal()
+            st.metric("💳 Накопленный безнал", f"{acc:.0f} ₽")
+            db_path = get_current_db_name()
+            if os.path.exists(db_path):
+                st.caption(f"💾 БД: {os.path.getsize(db_path) / 1024:.1f} KB")
+        except Exception:
+            pass
+
+        st.divider()
+        page = st.session_state.get("page", "main")
+        if st.button("🏠 Главная", use_container_width=True,
+                     type="primary" if page == "main" else "secondary"):
+            st.session_state.page = "main"; st.rerun()
+        if st.button("📊 Отчёты", use_container_width=True,
+                     type="primary" if page == "reports" else "secondary"):
+            st.session_state.page = "reports"; st.rerun()
+        if st.button("🔧 Настройки", use_container_width=True,
+                     type="primary" if page == "admin" else "secondary"):
+            st.session_state.page = "admin"; st.rerun()
+        st.divider()
+        if st.button("👋 Выйти", use_container_width=True):
+            clear_session_disk()
+            st.session_state.clear()
+            st.rerun()
+
     # Основные страницы
     page = st.session_state.get("page", "main")
-
     if page == "main":
         show_main_page()
     elif page == "reports":
         show_reports_page()
     elif page == "admin":
         show_admin_page()
-
-    # Нижняя навигация — всегда внизу
-    st.divider()
-    render_bottom_nav(page)
