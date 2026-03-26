@@ -573,10 +573,10 @@ def upload_and_restore_backup(file) -> bool:
     return True
 
 
-# ===== ЯНДЕКС ДИСК БЭКАП (WebDAV) =====
-YADISK_WEBDAV = "https://webdav.yandex.ru"
-YADISK_BACKUP_DIR = "/taxi_backup"
-YADISK_BACKUP_FILENAME = "taxi_backup.db"
+# ===== ЯНДЕКС ДИСК БЭКАП (REST API) =====
+YADISK_API = "https://cloud-api.yandex.net/v1/disk"
+YADISK_BACKUP_PATH = "disk:/taxi_backup/taxi_backup.db"
+YADISK_BACKUP_DIR_PATH = "disk:/taxi_backup"
 
 
 def get_yadisk_token() -> str:
@@ -589,25 +589,37 @@ def get_yadisk_token() -> str:
     return str(st.session_state.get("yadisk_token", token)).strip()
 
 
-def _yadisk_request(method: str, path: str, token: str,
-                    data=None, timeout: int = 30) -> tuple:
-    """Выполняет WebDAV запрос. Возвращает (status_code, response_bytes)."""
+def _yadisk_api(method: str, url: str, token: str,
+                data=None, params: dict = None, timeout: int = 30) -> tuple:
+    """Выполняет запрос к REST API Яндекс Диска. Возвращает (status, dict_or_bytes)."""
     import urllib.request
-    url = YADISK_WEBDAV + path
+    import urllib.parse
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"OAuth {token}")
+    req.add_header("Accept", "application/json")
     if data:
         req.add_header("Content-Type", "application/octet-stream")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read()
+            raw = resp.read()
+            try:
+                return resp.status, json.loads(raw)
+            except Exception:
+                return resp.status, raw
     except Exception as e:
         code = getattr(e, "code", 0)
-        return code, str(e).encode()
+        try:
+            body = e.read()
+            return code, json.loads(body)
+        except Exception:
+            return code, {"message": str(e)}
 
 
 def yadisk_upload_backup(token: str) -> bool:
-    """Загружает .db файл на Яндекс Диск через WebDAV. Возвращает True при успехе."""
+    """Загружает .db файл на Яндекс Диск через REST API."""
+    import urllib.request
     db_path = get_current_db_name()
     if not os.path.exists(db_path):
         st.error("❌ База данных не найдена")
@@ -616,44 +628,76 @@ def yadisk_upload_backup(token: str) -> bool:
         st.error("❌ Не задан токен Яндекс Диска")
         return False
 
-    # Убеждаемся что папка существует (MKCOL = создать директорию)
-    status, _ = _yadisk_request("MKCOL", YADISK_BACKUP_DIR, token)
-    if status not in (201, 301, 405):  # 405 = уже существует
-        st.warning(f"⚠️ Папка не создана (код {status}), пробуем загрузить в корень")
+    # Создаём папку (игнорируем ошибку если уже существует)
+    _yadisk_api("PUT", f"{YADISK_API}/resources", token,
+                params={"path": YADISK_BACKUP_DIR_PATH})
 
-    remote_path = f"{YADISK_BACKUP_DIR}/{YADISK_BACKUP_FILENAME}"
+    # Получаем URL для загрузки
+    status, resp = _yadisk_api(
+        "GET", f"{YADISK_API}/resources/upload", token,
+        params={"path": YADISK_BACKUP_PATH, "overwrite": "true"}
+    )
+    if status != 200:
+        msg = resp.get("message", str(resp)) if isinstance(resp, dict) else str(resp)
+        st.error(f"❌ Не удалось получить URL загрузки (код {status}): {msg}")
+        return False
+
+    upload_url = resp.get("href") if isinstance(resp, dict) else None
+    if not upload_url:
+        st.error("❌ Яндекс не вернул URL для загрузки")
+        return False
+
+    # Загружаем файл по подписанному URL (без заголовка авторизации)
     with open(db_path, "rb") as f:
         db_bytes = f.read()
-
-    status, body = _yadisk_request("PUT", remote_path, token, data=db_bytes)
-    if status in (200, 201, 204):
-        return True
-    else:
-        st.error(f"❌ Ошибка загрузки (код {status}): {body.decode('utf-8', errors='replace')[:200]}")
+    req = urllib.request.Request(upload_url, data=db_bytes, method="PUT")
+    req.add_header("Content-Type", "application/octet-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.status in (200, 201, 202, 204)
+    except Exception as e:
+        code = getattr(e, "code", 0)
+        st.error(f"❌ Ошибка загрузки файла (код {code}): {e}")
         return False
 
 
 def yadisk_download_backup(token: str) -> bool:
-    """Скачивает .db файл с Яндекс Диска. Возвращает True при успехе."""
+    """Скачивает .db файл с Яндекс Диска через REST API."""
+    import urllib.request
     if not token:
         st.error("❌ Не задан токен Яндекс Диска")
         return False
 
-    remote_path = f"{YADISK_BACKUP_DIR}/{YADISK_BACKUP_FILENAME}"
-    status, body = _yadisk_request("GET", remote_path, token, timeout=60)
-
+    # Получаем URL для скачивания
+    status, resp = _yadisk_api(
+        "GET", f"{YADISK_API}/resources/download", token,
+        params={"path": YADISK_BACKUP_PATH}
+    )
     if status == 404:
-        st.warning("⚠️ Файл не найден на Яндекс Диске")
+        st.warning("⚠️ Файл не найден на Яндекс Диске — сначала сделайте загрузку")
         return False
     if status != 200:
-        st.error(f"❌ Ошибка скачивания (код {status})")
+        msg = resp.get("message", str(resp)) if isinstance(resp, dict) else str(resp)
+        st.error(f"❌ Не удалось получить URL скачивания (код {status}): {msg}")
         return False
-    if len(body) < 100:
+
+    download_url = resp.get("href") if isinstance(resp, dict) else None
+    if not download_url:
+        st.error("❌ Яндекс не вернул URL для скачивания")
+        return False
+
+    try:
+        with urllib.request.urlopen(download_url, timeout=120) as r:
+            db_bytes = r.read()
+    except Exception as e:
+        st.error(f"❌ Ошибка скачивания: {e}")
+        return False
+
+    if len(db_bytes) < 100:
         st.error("❌ Скачанный файл слишком мал, возможно повреждён")
         return False
 
     db_path = get_current_db_name()
-    # Бэкапим текущую БД перед заменой
     try:
         if os.path.exists(db_path):
             create_backup()
@@ -661,9 +705,8 @@ def yadisk_download_backup(token: str) -> bool:
         pass
 
     with open(db_path, "wb") as f:
-        f.write(body)
+        f.write(db_bytes)
 
-    # Проверяем валидность SQLite
     try:
         conn = sqlite3.connect(db_path)
         conn.execute("SELECT name FROM sqlite_master LIMIT 1")
@@ -676,28 +719,23 @@ def yadisk_download_backup(token: str) -> bool:
 
 
 def yadisk_get_backup_info(token: str) -> dict:
-    """Получает информацию о файле на Яндекс Диске (PROPFIND)."""
-    import xml.etree.ElementTree as ET
+    """Получает информацию о файле бэкапа через REST API."""
     if not token:
         return {}
-    remote_path = f"{YADISK_BACKUP_DIR}/{YADISK_BACKUP_FILENAME}"
-    import urllib.request
-    url = YADISK_WEBDAV + remote_path
-    req = urllib.request.Request(url, method="PROPFIND")
-    req.add_header("Authorization", f"OAuth {token}")
-    req.add_header("Depth", "0")
-    req.add_header("Content-Type", "application/xml")
-    req.data = b'<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop><D:getlastmodified/><D:getcontentlength/></D:prop></D:propfind>'
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            xml_body = resp.read()
-        root = ET.fromstring(xml_body)
-        ns = {"D": "DAV:"}
-        modified = root.findtext(".//D:getlastmodified", namespaces=ns) or ""
-        size = root.findtext(".//D:getcontentlength", namespaces=ns) or "0"
-        return {"modified": modified, "size_kb": int(size) // 1024}
-    except Exception:
-        return {}
+    status, resp = _yadisk_api(
+        "GET", f"{YADISK_API}/resources", token,
+        params={"path": YADISK_BACKUP_PATH, "fields": "modified,size"}
+    )
+    if status == 200 and isinstance(resp, dict):
+        size_kb = (resp.get("size") or 0) // 1024
+        modified = resp.get("modified", "")
+        try:
+            dt = datetime.fromisoformat(modified.replace("Z", "+00:00"))
+            modified = dt.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y %H:%M")
+        except Exception:
+            pass
+        return {"modified": modified, "size_kb": size_kb}
+    return {}
 
 
 # ===== UI: ВХОД / РЕГИСТРАЦИЯ =====
