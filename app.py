@@ -70,13 +70,14 @@ def apply_mobile_css():
     /* Selectbox */
     .stSelectbox select { font-size: 1rem !important; min-height: 48px !important; }
 
-    /* Убираем верхнюю панель с именами страниц (app/admin/reports) */
-    [data-testid="stMainMenu"] { display: none !important; }
+    /* Убираем верхнюю панель Streamlit (хедер с именем приложения) */
     header[data-testid="stHeader"] { display: none !important; }
     #MainMenu { display: none !important; }
-    .stAppHeader { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
     div[data-testid="stDecoration"] { display: none !important; }
+
+    /* Убираем "Made with Streamlit" */
+    footer { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
