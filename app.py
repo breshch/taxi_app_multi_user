@@ -181,6 +181,12 @@ def check_and_create_tables():
         c.execute("""CREATE TABLE IF NOT EXISTS accumulated_beznal (
             id INTEGER PRIMARY KEY AUTOINCREMENT, driver_id INTEGER DEFAULT 1,
             total_amount REAL DEFAULT 0, last_updated TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS beznal_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount REAL NOT NULL,
+            payment_date TEXT NOT NULL,
+            note TEXT DEFAULT '',
+            created_at TEXT)""")
         c.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
         if not c.fetchone():
             c.execute(
@@ -308,6 +314,69 @@ def set_accumulated_beznal(amount: float):
     )
     conn.commit()
     conn.close()
+
+
+def add_beznal_payment(amount: float, payment_date: str, note: str = "") -> bool:
+    """Фиксирует выплату безнала: уменьшает накопленный остаток."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        # Проверяем что хватает средств
+        c.execute("SELECT total_amount FROM accumulated_beznal WHERE driver_id=1")
+        row = c.fetchone()
+        current = float(row[0]) if row else 0.0
+        # Записываем выплату
+        c.execute(
+            "INSERT INTO beznal_payments (amount, payment_date, note, created_at) VALUES (?,?,?,?)",
+            (amount, payment_date, note,
+             datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        # Вычитаем из накопленного
+        c.execute(
+            "UPDATE accumulated_beznal SET total_amount=total_amount-?, last_updated=? WHERE driver_id=1",
+            (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_beznal_payments() -> list:
+    """Возвращает историю выплат безнала, новые сверху."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, amount, payment_date, note FROM beznal_payments ORDER BY payment_date DESC, id DESC"
+    )
+    rows = c.fetchall()
+    conn.close()
+    return [{"id": r[0], "amount": r[1], "date": r[2], "note": r[3] or ""} for r in rows]
+
+
+def delete_beznal_payment(payment_id: int):
+    """Удаляет выплату и возвращает сумму обратно в безнал."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT amount FROM beznal_payments WHERE id=?", (payment_id,))
+        row = c.fetchone()
+        if row:
+            amount = float(row[0])
+            c.execute("DELETE FROM beznal_payments WHERE id=?", (payment_id,))
+            c.execute(
+                "UPDATE accumulated_beznal SET total_amount=total_amount+?, last_updated=? WHERE driver_id=1",
+                (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 
 def add_order_and_update_beznal(shift_id, order_type, amount, tips, commission, total, beznal_added, order_time):
@@ -1106,8 +1175,8 @@ def show_admin_page():
                 st.error("❌ Неверный пароль")
         return
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📦 Бэкапы", "☁️ Яндекс Диск", "💳 Безнал", "🔄 Пересчёт", "⚠️ Сброс"
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📦 Бэкапы", "☁️ Яндекс Диск", "💳 Безнал", "⚠️ Сброс"
     ])
 
     # ===== TAB 1: БЭКАПЫ =====
@@ -1238,29 +1307,90 @@ YADISK_TOKEN = "y0_AgAAAA..."
 
     # ===== TAB 3: БЕЗНАЛ =====
     with tab3:
-        st.markdown("### 💳 Накопленный безнал")
+        st.markdown("### 💳 Безнал")
+
         cur = get_accumulated_beznal()
-        st.metric("Текущее значение", f"{cur:.0f} ₽")
-        new_val = st.number_input("Новое значение (₽)", value=float(cur), key="new_beznal")
-        if st.button("💾 Установить", use_container_width=True):
-            set_accumulated_beznal(new_val)
-            st.success(f"✅ Установлено: {new_val:.0f} ₽")
-            st.rerun()
+        payments = get_beznal_payments()
+        total_paid = sum(p["amount"] for p in payments)
 
-    # ===== TAB 4: ПЕРЕСЧЁТ =====
+        # Текущий остаток крупно
+        st.metric("💳 Остаток безнала", f"{cur:.0f} ₽",
+                  delta=f"Выплачено всего: {total_paid:.0f} ₽")
+
+        st.divider()
+
+        # ===== ФОРМА ВЫПЛАТЫ =====
+        st.markdown("#### 💸 Внести выплату")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            pay_amount = st.number_input(
+                "Сумма выплаты (₽)", min_value=0.0, step=100.0,
+                value=float(max(0, cur)), key="pay_amount"
+            )
+        with c2:
+            pay_date = st.date_input(
+                "Дата", value=date.today(), key="pay_date"
+            )
+        pay_note = st.text_input(
+            "Комментарий (необязательно)",
+            placeholder="например: выплата за неделю",
+            key="pay_note"
+        )
+
+        if pay_amount > cur:
+            st.warning(f"⚠️ Сумма выплаты ({pay_amount:.0f} ₽) больше остатка ({cur:.0f} ₽)")
+
+        if st.button("💸 Зафиксировать выплату", use_container_width=True,
+                     type="primary", key="btn_pay_beznal"):
+            if pay_amount <= 0:
+                st.error("❌ Введите сумму больше 0")
+            else:
+                try:
+                    add_beznal_payment(
+                        pay_amount,
+                        pay_date.strftime("%Y-%m-%d"),
+                        pay_note.strip()
+                    )
+                    st.success(f"✅ Выплата {pay_amount:.0f} ₽ зафиксирована! "
+                               f"Остаток: {cur - pay_amount:.0f} ₽")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {e}")
+
+        st.divider()
+
+        # ===== ИСТОРИЯ ВЫПЛАТ =====
+        st.markdown("#### 📋 История выплат")
+        if not payments:
+            st.info("Выплат пока нет")
+        else:
+            # Итог
+            st.caption(f"Всего выплат: **{len(payments)}** на сумму **{total_paid:.0f} ₽**")
+
+            for p in payments:
+                c1, c2, c3 = st.columns([2, 2, 1])
+                c1.markdown(f"**{p['amount']:.0f} ₽**")
+                note_str = f" · {p['note']}" if p['note'] else ""
+                c2.markdown(f"📅 {p['date']}{note_str}")
+                if c3.button("🗑️", key=f"del_pay_{p['id']}", use_container_width=True):
+                    try:
+                        delete_beznal_payment(p["id"])
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+        st.divider()
+        # Ручная корректировка остатка
+        with st.expander("⚙️ Ручная корректировка остатка", expanded=False):
+            new_val = st.number_input("Установить остаток вручную (₽)",
+                                      value=float(cur), key="new_beznal")
+            if st.button("💾 Установить", use_container_width=True):
+                set_accumulated_beznal(new_val)
+                st.success(f"✅ Установлено: {new_val:.0f} ₽")
+                st.rerun()
+
+    # ===== TAB 4: СБРОС =====
     with tab4:
-        st.markdown("### 🔄 Пересчёт комиссий")
-        st.caption("Пересчитает все заказы по текущим ставкам (нал 78%, карта 75%)")
-        if st.button("🔄 Пересчитать всё", use_container_width=True, type="primary"):
-            try:
-                from pages_imports import recalc_full_db
-                new_beznal = recalc_full_db()
-                st.success(f"✅ Готово. Новый безнал: {new_beznal:.0f} ₽")
-            except Exception as e:
-                st.error(f"❌ {e}")
-
-    # ===== TAB 5: СБРОС =====
-    with tab5:
         st.markdown("### ⚠️ Опасная зона")
         st.error("Удаление всех данных — действие необратимо!")
         confirm_text = st.text_input("Введите **СБРОС** для подтверждения", placeholder="СБРОС")
