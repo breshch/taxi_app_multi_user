@@ -1231,10 +1231,45 @@ def show_admin_page():
     # ===== TAB 2: ЯНДЕКС ДИСК =====
     with tab2:
         st.markdown("### ☁️ Яндекс Диск")
-        st.info("Бэкап автоматически создаётся при закрытии каждой смены.\nСтруктура: `jet/<пользователь>/backup_<дата>.db`")
 
-        with st.expander("ℹ️ Как получить токен", expanded=False):
-            st.markdown("""
+        tok = get_yadisk_token()
+
+        # Проверяем токен — пробуем получить инфо о диске
+        token_ok = False
+        if tok:
+            try:
+                import urllib.request as _ur
+                _req = _ur.Request(
+                    "https://cloud-api.yandex.net/v1/disk",
+                    headers={"Authorization": f"OAuth {tok}"}
+                )
+                with _ur.urlopen(_req, timeout=5) as _r:
+                    token_ok = _r.status == 200
+            except Exception:
+                token_ok = False
+
+        # Если токен работает — показываем статус и прячем форму
+        if token_ok:
+            st.success("✅ Яндекс Диск подключён")
+            st.caption(f"Структура: `jet/{st.session_state.get('username')}/backup_<дата>.db`")
+            with st.expander("🔑 Изменить токен", expanded=False):
+                yd_token = st.text_input(
+                    "OAuth-токен", value=tok, type="password",
+                    key="input_yd_token"
+                )
+                if st.button("💾 Сохранить", use_container_width=True, key="save_tok"):
+                    st.session_state.yadisk_token = yd_token.strip()
+                    st.success("✅ Сохранено")
+                    st.rerun()
+        else:
+            # Токена нет или не работает
+            if tok:
+                st.error("❌ Токен не работает — введите новый")
+            else:
+                st.warning("⚠️ Токен не задан")
+
+            with st.expander("ℹ️ Как получить токен", expanded=False):
+                st.markdown("""
 **1. Перейдите по ссылке** (подставьте ваш ClientID):
 ```
 https://oauth.yandex.ru/authorize?response_type=token&client_id=ВАШ_CLIENT_ID
@@ -1245,32 +1280,30 @@ https://oauth.yandex.ru/authorize?response_type=token&client_id=ВАШ_CLIENT_ID
 ```toml
 YADISK_TOKEN = "y0_AgAAAA..."
 ```
-            """)
+                """)
 
-        saved_token = get_yadisk_token()
-        yd_token = st.text_input(
-            "🔑 OAuth-токен Яндекс Диска",
-            value=saved_token,
-            type="password",
-            placeholder="y0_AgAAAA...",
-            key="input_yd_token"
-        )
-        if st.button("💾 Сохранить токен", use_container_width=True):
-            st.session_state.yadisk_token = yd_token.strip()
-            st.success("✅ Токен сохранён до перезапуска")
+            yd_token = st.text_input(
+                "🔑 OAuth-токен Яндекс Диска",
+                value=tok,
+                type="password",
+                placeholder="y0_AgAAAA...",
+                key="input_yd_token"
+            )
+            if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
+                st.session_state.yadisk_token = yd_token.strip()
+                st.success("✅ Сохранён, проверяю...")
+                st.rerun()
 
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
             if st.button("📤 Загрузить бэкап сейчас", use_container_width=True, type="primary"):
-                tok = get_yadisk_token()
                 with st.spinner("Загружаю..."):
                     date_str = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
                     if yadisk_upload_backup(tok, shift_date=date_str):
-                        st.success(f"✅ Бэкап загружен!\nФайл: backup_{date_str}.db")
+                        st.success(f"✅ Загружено: backup_{date_str}.db")
         with col2:
             if st.button("📥 Восстановить последний", use_container_width=True):
-                tok = get_yadisk_token()
                 with st.spinner("Скачиваю..."):
                     try:
                         if yadisk_download_backup(tok):
@@ -1279,16 +1312,15 @@ YADISK_TOKEN = "y0_AgAAAA..."
                     except Exception as e:
                         st.error(f"❌ {e}")
 
-        # Список бэкапов пользователя
+        # Список бэкапов
         st.divider()
         st.markdown("**📋 Бэкапы на Яндекс Диске:**")
-        tok = get_yadisk_token()
         if tok:
             with st.spinner("Загружаю список..."):
                 backups = yadisk_list_backups(tok)
             if backups:
                 for b in backups:
-                    c1, c2, c3 = st.columns([3, 1, 1])
+                    c1, c2 = st.columns([4, 1])
                     c1.markdown(f"📄 **{b['name']}**  \n📅 {b['modified']} · {b['size_kb']} KB")
                     if c2.button("📥", key=f"yd_dl_{b['name']}", use_container_width=True,
                                  help="Восстановить из этого бэкапа"):
@@ -1299,7 +1331,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
                                     st.rerun()
                             except Exception as e:
                                 st.error(f"❌ {e}")
-                    c3.markdown(f"`{b['name']}`", help=b["path"])
             else:
                 st.info("Бэкапов нет. Они появятся после закрытия первой смены.")
         else:
