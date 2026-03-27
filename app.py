@@ -70,8 +70,13 @@ def apply_mobile_css():
     /* Selectbox */
     .stSelectbox select { font-size: 1rem !important; min-height: 48px !important; }
 
-    /* Убираем "Made with Streamlit" */
-    footer { display: none !important; }
+    /* Убираем верхнюю панель с именами страниц (app/admin/reports) */
+    [data-testid="stMainMenu"] { display: none !important; }
+    header[data-testid="stHeader"] { display: none !important; }
+    #MainMenu { display: none !important; }
+    .stAppHeader { display: none !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    div[data-testid="stDecoration"] { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -915,10 +920,12 @@ def show_main_page():
         card_sum = totals.get("карта", 0)
         tips_sum = totals.get("чаевые", 0)
         total_income = nal_sum + card_sum + tips_sum
+
+        st.markdown("### 💰 Итог смены")
         c1, c2, c3 = st.columns(3)
-        c1.metric("💵 Нал", f"{nal_sum:.0f} ₽")
-        c2.metric("💳 Карта", f"{card_sum:.0f} ₽")
-        c3.metric("💡 Чаевые", f"{tips_sum:.0f} ₽")
+        c1.metric("💵 Нал + чаевые", f"{nal_sum + tips_sum:.0f} ₽")
+        c2.metric("💳 Безнал", f"{card_sum:.0f} ₽")
+        c3.metric("💰 Всего", f"{total_income:.0f} ₽")
     else:
         total_income = 0.0
 
