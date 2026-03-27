@@ -70,6 +70,12 @@ def apply_mobile_css():
     /* Selectbox */
     .stSelectbox select { font-size: 1rem !important; min-height: 48px !important; }
 
+    /* Убираем блок app/Admin/Reports вверху сайдбара */
+    [data-testid="stSidebarNav"] { display: none !important; }
+
+    /* Убираем блок multipage навигации (app/Admin/Raports) вверху сайдбара */
+    [data-testid="stSidebarNav"] { display: none !important; }
+
     /* Убираем "Made with Streamlit" снизу */
     footer { visibility: hidden; }
 
