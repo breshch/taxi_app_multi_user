@@ -729,9 +729,6 @@ def show_main_page():
         st.markdown("**📷 Сканировать QR с чека:**")
         qr_tab1, qr_tab2, qr_tab3 = st.tabs(["📸 Камера", "🖼️ Загрузить фото", "📋 Текст из QR"])
 
-        qr_amount = st.session_state.get("qr_detected_amount", None)
-        qr_date_str = st.session_state.get("qr_detected_date", "")
-
         def _process_qr_bytes(img_bytes):
             """Декодирует QR и сохраняет результат в session_state."""
             qr_text = decode_qr_image(img_bytes)
@@ -796,31 +793,46 @@ def show_main_page():
         st.divider()
 
         # --- Форма добавления расхода ---
-        st.markdown("**➕ Добавить расход:**")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
-        with c2:
-            # Если QR распознан — подставляем сумму
-            default_amt = float(qr_amount) if qr_amount else 100.0
-            exp_amt = st.number_input("💰 Сумма ₽", min_value=0.0, step=50.0,
-                                       value=default_amt, key="exp_amt")
+        qr_amount = st.session_state.get("qr_detected_amount", None)
+        qr_date_str = st.session_state.get("qr_detected_date", "")
 
-        # Показываем подсказку если сумма из QR
         if qr_amount:
-            st.info(f"💡 Сумма подставлена из QR-кода чека: **{qr_amount:.2f} ₽**"
-                    + (f" от {qr_date_str}" if qr_date_str else ""))
-            if st.button("✖️ Сбросить QR", key="btn_reset_qr", use_container_width=False):
-                st.session_state.pop("qr_detected_amount", None)
-                st.session_state.pop("qr_detected_date", None)
-                st.rerun()
+            st.success(f"✅ QR распознан — сумма **{qr_amount:.2f} ₽**"
+                       + (f" от {qr_date_str}" if qr_date_str else ""))
 
-        if st.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp", type="primary"):
+        st.markdown("**➕ Добавить расход:**")
+
+        # Тип расхода — крупно, на всю ширину
+        exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
+
+        # Сумма — подставляем из QR через session_state ключ
+        amt_key = "exp_amt_qr" if qr_amount else "exp_amt_manual"
+        # Синхронизируем ключ с QR суммой
+        if qr_amount and amt_key not in st.session_state:
+            st.session_state[amt_key] = float(qr_amount)
+
+        exp_amt = st.number_input(
+            "💰 Сумма (₽)",
+            min_value=0.0,
+            step=10.0,
+            value=float(qr_amount) if qr_amount else 100.0,
+            key=amt_key
+        )
+
+        c1, c2 = st.columns(2)
+        if c1.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp", type="primary"):
             add_extra_expense(shift_id, exp_amt, exp_desc)
-            # Сбрасываем QR после добавления
+            # Сбрасываем QR и ключи после добавления
             st.session_state.pop("qr_detected_amount", None)
             st.session_state.pop("qr_detected_date", None)
+            st.session_state.pop("exp_amt_qr", None)
             st.rerun()
+        if qr_amount:
+            if c2.button("✖️ Сбросить QR", use_container_width=True, key="btn_reset_qr"):
+                st.session_state.pop("qr_detected_amount", None)
+                st.session_state.pop("qr_detected_date", None)
+                st.session_state.pop("exp_amt_qr", None)
+                st.rerun()
 
         # Список расходов
         expenses = get_extra_expenses(shift_id)
