@@ -1,9 +1,12 @@
-# app.py — ПОЛНАЯ ВЕРСИЯ v2: мобильная, без боковой панели, Telegram бэкап
+# app.py — Taxi Shift Manager (чистая версия)
 import os
 import json
+import base64
 import shutil
 import sqlite3
 import time
+import urllib.request
+import urllib.parse
 from datetime import datetime, date, timezone, timedelta
 import pandas as pd
 import streamlit as st
@@ -17,155 +20,84 @@ SESSION_TIMEOUT = 30 * 24 * 60 * 60
 RATE_NAL = 0.78
 RATE_CARD = 0.75
 MOSCOW_TZ = timezone(timedelta(hours=3))
+YADISK_API = "https://cloud-api.yandex.net/v1/disk"
+YADISK_ROOT = "disk:/jet"
 POPULAR_EXPENSES = [
     "🚗 Мойка", "💧 Омывайка", "🍔 Еда", "☕ Кофе", "🚬 Сигареты",
     "🔧 Мелкий ремонт", "🅿️ Парковка", "💰 Штраф", "🧴 Очиститель",
     "🔋 Зарядка", "🧰 Инструмент", "📱 Связь", "🚕 Аренда", "💊 Аптека"
 ]
 
-# ===== CSS: МОБИЛЬНАЯ ОПТИМИЗАЦИЯ =====
-def apply_mobile_css():
-    st.markdown("""
-    <style>
-    /* Убираем лишние отступы основного контента */
-    .main > div { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
-    .block-container {
-        padding-top: 2rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 100% !important;
-    }
-
-    /* Крупные кнопки для пальцев */
-    .stButton > button {
-        width: 100% !important;
-        min-height: 52px !important;
-        font-size: 1rem !important;
-        border-radius: 12px !important;
-        font-weight: 600 !important;
-    }
-
-    /* Крупные поля ввода */
-    .stTextInput input, .stNumberInput input {
-        font-size: 1.1rem !important;
-        min-height: 48px !important;
-        border-radius: 10px !important;
-    }
-
-    /* Карточки метрик */
-    [data-testid="metric-container"] {
-        background: #f8fafc;
-        border-radius: 12px;
-        padding: 12px !important;
-        border: 1px solid #e2e8f0;
-    }
-
-    /* Заголовки */
-    h1 { font-size: 1.5rem !important; margin-bottom: 0.5rem !important; }
-    h2 { font-size: 1.3rem !important; }
-    h3 { font-size: 1.1rem !important; }
-
-    /* Компактные разделители */
-    hr { margin: 0.5rem 0 !important; }
-
-    /* Selectbox */
-    .stSelectbox select { font-size: 1rem !important; min-height: 48px !important; }
-
-    /* Убираем блок app/Admin/Reports вверху сайдбара */
-    [data-testid="stSidebarNav"] { display: none !important; }
-
-    /* Убираем блок multipage навигации (app/Admin/Raports) вверху сайдбара */
-    [data-testid="stSidebarNav"] { display: none !important; }
-
-    /* Убираем "Made with Streamlit" снизу */
-    footer { visibility: hidden; }
-
-    /* Убираем красную полоску сверху */
-    div[data-testid="stDecoration"] { display: none !important; }
-    </style>
-    """, unsafe_allow_html=True)
-
+# ===== CSS =====
+def apply_css():
+    st.markdown("""<style>
+    .main > div { padding-left:.75rem !important; padding-right:.75rem !important; }
+    .block-container { padding-top:5rem !important; padding-bottom:2rem !important; max-width:100% !important; }
+    .stButton > button { width:100% !important; min-height:52px !important; font-size:1rem !important; border-radius:12px !important; font-weight:600 !important; }
+    .stTextInput input, .stNumberInput input { font-size:1.1rem !important; min-height:48px !important; border-radius:10px !important; }
+    [data-testid="metric-container"] { background:#f8fafc; border-radius:12px; padding:12px !important; border:1px solid #e2e8f0; }
+    [data-testid="stSidebarNav"] { display:none !important; }
+    div[data-testid="stDecoration"] { display:none !important; }
+    footer { visibility:hidden; }
+    h1 { font-size:1.5rem !important; } h2 { font-size:1.3rem !important; } h3 { font-size:1.1rem !important; }
+    hr { margin:.5rem 0 !important; }
+    </style>""", unsafe_allow_html=True)
 
 # ===== СЕССИЯ =====
-def save_session_to_disk():
+def save_session():
     try:
-        if "username" in st.session_state:
-            data = {
-                "username": st.session_state["username"],
-                "session_start": st.session_state.get("session_start").isoformat()
-                    if st.session_state.get("session_start") else None,
-            }
-            with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-    except Exception:
-        pass
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump({"username": st.session_state.get("username"),
+                       "session_start": st.session_state.get("session_start").isoformat()
+                       if st.session_state.get("session_start") else None}, f)
+    except Exception: pass
 
-
-def load_session_from_disk():
+def load_session():
     try:
         if os.path.exists(SESSION_FILE):
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            start_str = data.get("session_start")
-            if start_str:
-                start = datetime.fromisoformat(start_str).replace(tzinfo=MOSCOW_TZ)
-                if (datetime.now(MOSCOW_TZ) - start).total_seconds() < SESSION_TIMEOUT:
+            data = json.load(open(SESSION_FILE, "r", encoding="utf-8"))
+            start = data.get("session_start")
+            if start:
+                dt = datetime.fromisoformat(start).replace(tzinfo=MOSCOW_TZ)
+                if (datetime.now(MOSCOW_TZ) - dt).total_seconds() < SESSION_TIMEOUT:
                     return data.get("username")
-    except Exception:
-        pass
+    except Exception: pass
     return None
 
-
-def clear_session_disk():
+def clear_session():
     try:
-        if os.path.exists(SESSION_FILE):
-            os.remove(SESSION_FILE)
-    except Exception:
-        pass
-
+        if os.path.exists(SESSION_FILE): os.remove(SESSION_FILE)
+    except Exception: pass
 
 def init_session():
     if "session_start" not in st.session_state:
         st.session_state.session_start = datetime.now(MOSCOW_TZ)
-        save_session_to_disk()
-    elapsed = (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds()
-    if elapsed > SESSION_TIMEOUT:
-        st.session_state.clear()
-        clear_session_disk()
-        st.warning("⏰ Сессия истекла, войдите снова")
-        st.rerun()
-
+        save_session()
+    if (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds() > SESSION_TIMEOUT:
+        st.session_state.clear(); clear_session()
+        st.warning("⏰ Сессия истекла"); st.rerun()
 
 # ===== ПАПКИ =====
-def ensure_users_dir():
-    os.makedirs(USERS_DIR, exist_ok=True)
-
+def ensure_users_dir(): os.makedirs(USERS_DIR, exist_ok=True)
 
 def get_user_dir(username: str) -> str:
     safe = "".join(c for c in username if c.isalnum() or c in ("_", "-")) or "user"
-    path = os.path.join(USERS_DIR, safe)
-    os.makedirs(path, exist_ok=True)
-    return path
-
+    path = os.path.join(USERS_DIR, safe); os.makedirs(path, exist_ok=True); return path
 
 def get_current_db_name() -> str:
-    username = st.session_state.get("username")
-    if not username:
-        return "taxi_default.db"
-    safe = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
-    return os.path.join(get_user_dir(username), f"taxi{safe}.db")
-
+    u = st.session_state.get("username")
+    if not u: return "taxi_default.db"
+    safe = "".join(c for c in u if c.isalnum() or c in ("_", "-"))
+    return os.path.join(get_user_dir(u), f"taxi{safe}.db")
 
 def get_backup_dir() -> str:
     path = os.path.join(get_user_dir(st.session_state.get("username", "unknown")), "backups")
-    os.makedirs(path, exist_ok=True)
-    return path
-
+    os.makedirs(path, exist_ok=True); return path
 
 # ===== БД =====
 def check_and_create_tables():
     try:
-        conn = sqlite3.connect(get_current_db_name())
-        c = conn.cursor()
+        conn = sqlite3.connect(get_current_db_name()); c = conn.cursor()
         c.execute("""CREATE TABLE IF NOT EXISTS shifts (
             id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, km INTEGER DEFAULT 0,
             fuel_liters REAL DEFAULT 0, fuel_price REAL DEFAULT 0,
@@ -182,527 +114,346 @@ def check_and_create_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT, driver_id INTEGER DEFAULT 1,
             total_amount REAL DEFAULT 0, last_updated TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS beznal_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, amount REAL NOT NULL,
+            payment_date TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS user_profile (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            amount REAL NOT NULL,
-            payment_date TEXT NOT NULL,
-            note TEXT DEFAULT '',
-            created_at TEXT)""")
-        c.execute("SELECT id FROM accumulated_beznal WHERE driver_id = 1")
+            driver_name TEXT DEFAULT '', driver_number TEXT DEFAULT '',
+            photo_base64 TEXT DEFAULT '', name_font_size INTEGER DEFAULT 28,
+            updated_at TEXT)""")
+        c.execute("SELECT id FROM accumulated_beznal WHERE driver_id=1")
         if not c.fetchone():
-            c.execute(
-                "INSERT INTO accumulated_beznal (driver_id, total_amount, last_updated) VALUES (1, 0, ?)",
-                (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),)
-            )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        st.error(f"❌ Ошибка БД: {e}")
+            c.execute("INSERT INTO accumulated_beznal (driver_id,total_amount,last_updated) VALUES (1,0,?)",
+                      (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"),))
+        conn.commit(); conn.close()
+    except Exception as e: st.error(f"❌ Ошибка БД: {e}")
 
-
-def get_db_connection():
-    check_and_create_tables()
-    return sqlite3.connect(get_current_db_name())
-
+def get_db(): check_and_create_tables(); return sqlite3.connect(get_current_db_name())
 
 # ===== АВТОРИЗАЦИЯ =====
 def init_auth_db():
-    conn = sqlite3.connect(AUTH_DB)
-    c = conn.cursor()
+    conn = sqlite3.connect(AUTH_DB); c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL, created_at TEXT)""")
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
+def hash_pw(p: str) -> str: return bcrypt.hash(p.strip().encode("utf-8")[:72])
+def verify_pw(p: str, h: str) -> bool:
+    try: return bcrypt.verify(p.strip().encode("utf-8")[:72], h)
+    except: return False
 
-def hash_password(password: str) -> str:
-    return bcrypt.hash(password.strip().encode("utf-8")[:72])
-
-
-def verify_password(password: str, pw_hash: str) -> bool:
+def register_user(u: str, p: str) -> bool:
+    u = u.strip()
+    if not u or not p: return False
+    ensure_users_dir(); init_auth_db()
+    conn = sqlite3.connect(AUTH_DB); c = conn.cursor()
     try:
-        return bcrypt.verify(password.strip().encode("utf-8")[:72], pw_hash)
-    except Exception:
-        return False
-
-
-def register_user(username: str, password: str) -> bool:
-    username = username.strip()
-    if not username or not password:
-        return False
-    ensure_users_dir()
-    init_auth_db()
-    conn = sqlite3.connect(AUTH_DB)
-    c = conn.cursor()
-    try:
-        c.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, hash_password(password), datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d"))
-        )
+        c.execute("INSERT INTO users (username,password_hash,created_at) VALUES (?,?,?)",
+                  (u, hash_pw(p), datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")))
         conn.commit()
-        db_path = get_current_db_name()
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        check_and_create_tables()
-        return True
-    except Exception:
-        return False
-    finally:
-        conn.close()
+        db = get_current_db_name()
+        if os.path.exists(db): os.remove(db)
+        check_and_create_tables(); return True
+    except: return False
+    finally: conn.close()
 
+def authenticate_user(u: str, p: str) -> bool:
+    init_auth_db(); conn = sqlite3.connect(AUTH_DB); c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE username=?", (u.strip(),))
+    row = c.fetchone(); conn.close()
+    return verify_pw(p, row[0]) if row else False
 
-def authenticate_user(username: str, password: str) -> bool:
-    init_auth_db()
-    conn = sqlite3.connect(AUTH_DB)
-    c = conn.cursor()
-    c.execute("SELECT password_hash FROM users WHERE username = ?", (username.strip(),))
-    row = c.fetchone()
-    conn.close()
-    return verify_password(password, row[0]) if row else False
+def get_all_users() -> list:
+    init_auth_db(); conn = sqlite3.connect(AUTH_DB); c = conn.cursor()
+    c.execute("SELECT username, created_at FROM users ORDER BY created_at DESC")
+    rows = c.fetchall(); conn.close()
+    return [{"username": r[0], "created": r[1]} for r in rows]
 
+def change_password(u: str, new_p: str) -> bool:
+    conn = sqlite3.connect(AUTH_DB); c = conn.cursor()
+    try:
+        c.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_pw(new_p), u))
+        conn.commit(); return c.rowcount > 0
+    except: return False
+    finally: conn.close()
+
+def delete_user(u: str):
+    conn = sqlite3.connect(AUTH_DB); c = conn.cursor()
+    c.execute("DELETE FROM users WHERE username=?", (u,)); conn.commit(); conn.close()
+
+# ===== ПРОФИЛЬ =====
+def get_user_profile() -> dict:
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT driver_name,driver_number,photo_base64,name_font_size FROM user_profile LIMIT 1")
+    row = c.fetchone(); conn.close()
+    if row: return {"name": row[0] or "", "number": row[1] or "",
+                    "photo": row[2] or "", "font_size": int(row[3] or 28)}
+    return {"name": "", "number": "", "photo": "", "font_size": 28}
+
+def save_user_profile(name: str, number: str, photo_b64: str, font_size: int):
+    conn = get_db(); c = conn.cursor(); now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("SELECT id FROM user_profile LIMIT 1")
+    if c.fetchone():
+        if photo_b64:
+            c.execute("UPDATE user_profile SET driver_name=?,driver_number=?,photo_base64=?,name_font_size=?,updated_at=?",
+                      (name, number, photo_b64, font_size, now))
+        else:
+            c.execute("UPDATE user_profile SET driver_name=?,driver_number=?,name_font_size=?,updated_at=? WHERE 1",
+                      (name, number, font_size, now))
+    else:
+        c.execute("INSERT INTO user_profile (driver_name,driver_number,photo_base64,name_font_size,updated_at) VALUES (?,?,?,?,?)",
+                  (name, number, photo_b64, font_size, now))
+    conn.commit(); conn.close()
+
+def delete_user_photo():
+    conn = get_db(); c = conn.cursor()
+    c.execute("UPDATE user_profile SET photo_base64='' WHERE 1"); conn.commit(); conn.close()
 
 # ===== СМЕНЫ =====
 def get_open_shift():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, date FROM shifts WHERE is_open = 1 LIMIT 1")
-    row = c.fetchone()
-    conn.close()
-    return row
-
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT id,date FROM shifts WHERE is_open=1 LIMIT 1")
+    row = c.fetchone(); conn.close(); return row
 
 def open_shift(date_str: str) -> int:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO shifts (date, is_open, opened_at) VALUES (?, 1, ?)",
-        (date_str, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    sid = c.lastrowid
-    conn.commit()
-    conn.close()
-    return sid
-
+    conn = get_db(); c = conn.cursor()
+    c.execute("INSERT INTO shifts (date,is_open,opened_at) VALUES (?,1,?)",
+              (date_str, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+    sid = c.lastrowid; conn.commit(); conn.close(); return sid
 
 def close_shift_db(shift_id: int, km: int, liters: float, fuel_price: float):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE shifts SET is_open=0, km=?, fuel_liters=?, fuel_price=?, closed_at=? WHERE id=?",
-        (km, liters, fuel_price, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"), shift_id)
-    )
-    conn.commit()
-    conn.close()
+    conn = get_db(); c = conn.cursor()
+    c.execute("UPDATE shifts SET is_open=0,km=?,fuel_liters=?,fuel_price=?,closed_at=? WHERE id=?",
+              (km, liters, fuel_price, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"), shift_id))
+    conn.commit(); conn.close()
 
-
-# ===== ЗАКАЗЫ =====
+# ===== БЕЗНАЛ =====
 def get_accumulated_beznal() -> float:
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT total_amount FROM accumulated_beznal WHERE driver_id = 1")
-    row = c.fetchone()
-    conn.close()
-    return float(row[0]) if row and row[0] is not None else 0.0
-
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT total_amount FROM accumulated_beznal WHERE driver_id=1")
+    row = c.fetchone(); conn.close(); return float(row[0]) if row and row[0] is not None else 0.0
 
 def set_accumulated_beznal(amount: float):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "UPDATE accumulated_beznal SET total_amount=?, last_updated=? WHERE driver_id=1",
-        (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    conn.commit()
-    conn.close()
+    conn = get_db(); c = conn.cursor()
+    c.execute("UPDATE accumulated_beznal SET total_amount=?,last_updated=? WHERE driver_id=1",
+              (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit(); conn.close()
 
-
-def add_beznal_payment(amount: float, payment_date: str, note: str = "") -> bool:
-    """Фиксирует выплату безнала: уменьшает накопленный остаток."""
-    conn = get_db_connection()
-    c = conn.cursor()
+def add_beznal_payment(amount: float, payment_date: str, note: str = ""):
+    conn = get_db(); c = conn.cursor()
     try:
-        # Проверяем что хватает средств
-        c.execute("SELECT total_amount FROM accumulated_beznal WHERE driver_id=1")
-        row = c.fetchone()
-        current = float(row[0]) if row else 0.0
-        # Записываем выплату
-        c.execute(
-            "INSERT INTO beznal_payments (amount, payment_date, note, created_at) VALUES (?,?,?,?)",
-            (amount, payment_date, note,
-             datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        # Вычитаем из накопленного
-        c.execute(
-            "UPDATE accumulated_beznal SET total_amount=total_amount-?, last_updated=? WHERE driver_id=1",
-            (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-        )
+        c.execute("INSERT INTO beznal_payments (amount,payment_date,note,created_at) VALUES (?,?,?,?)",
+                  (amount, payment_date, note, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+        c.execute("UPDATE accumulated_beznal SET total_amount=total_amount-?,last_updated=? WHERE driver_id=1",
+                  (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
-        return True
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
+    except Exception as e: conn.rollback(); raise e
+    finally: conn.close()
 
 def get_beznal_payments() -> list:
-    """Возвращает историю выплат безнала, новые сверху."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "SELECT id, amount, payment_date, note FROM beznal_payments ORDER BY payment_date DESC, id DESC"
-    )
-    rows = c.fetchall()
-    conn.close()
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT id,amount,payment_date,note FROM beznal_payments ORDER BY payment_date DESC,id DESC")
+    rows = c.fetchall(); conn.close()
     return [{"id": r[0], "amount": r[1], "date": r[2], "note": r[3] or ""} for r in rows]
 
-
-def delete_beznal_payment(payment_id: int):
-    """Удаляет выплату и возвращает сумму обратно в безнал."""
-    conn = get_db_connection()
-    c = conn.cursor()
+def delete_beznal_payment(pid: int):
+    conn = get_db(); c = conn.cursor()
     try:
-        c.execute("SELECT amount FROM beznal_payments WHERE id=?", (payment_id,))
+        c.execute("SELECT amount FROM beznal_payments WHERE id=?", (pid,))
         row = c.fetchone()
         if row:
-            amount = float(row[0])
-            c.execute("DELETE FROM beznal_payments WHERE id=?", (payment_id,))
-            c.execute(
-                "UPDATE accumulated_beznal SET total_amount=total_amount+?, last_updated=? WHERE driver_id=1",
-                (amount, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-            )
+            c.execute("DELETE FROM beznal_payments WHERE id=?", (pid,))
+            c.execute("UPDATE accumulated_beznal SET total_amount=total_amount+?,last_updated=? WHERE driver_id=1",
+                      (row[0], datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
             conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
+    except Exception as e: conn.rollback(); raise e
+    finally: conn.close()
 
-
-def add_order_and_update_beznal(shift_id, order_type, amount, tips, commission, total, beznal_added, order_time):
-    conn = get_db_connection()
-    c = conn.cursor()
+# ===== ЗАКАЗЫ =====
+def add_order_and_update_beznal(shift_id, otype, amount, tips, commission, total, beznal_added, order_time):
+    conn = get_db(); c = conn.cursor()
     try:
-        c.execute(
-            "INSERT INTO orders (shift_id, type, amount, tips, commission, total, beznal_added, order_time) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (shift_id, order_type, amount, tips, commission, total, beznal_added, order_time)
-        )
-        c.execute(
-            "UPDATE accumulated_beznal SET total_amount=total_amount+?, last_updated=? WHERE driver_id=1",
-            (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-        )
+        c.execute("INSERT INTO orders (shift_id,type,amount,tips,commission,total,beznal_added,order_time) VALUES (?,?,?,?,?,?,?,?)",
+                  (shift_id, otype, amount, tips, commission, total, beznal_added, order_time))
+        c.execute("UPDATE accumulated_beznal SET total_amount=total_amount+?,last_updated=? WHERE driver_id=1",
+                  (beznal_added, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
+    except Exception as e: conn.rollback(); raise e
+    finally: conn.close()
 
 def delete_order_and_update_beznal(order_id):
-    conn = get_db_connection()
-    c = conn.cursor()
+    conn = get_db(); c = conn.cursor()
     try:
         c.execute("SELECT beznal_added FROM orders WHERE id=?", (order_id,))
         row = c.fetchone()
         if row:
-            beznal = row[0] or 0.0
             c.execute("DELETE FROM orders WHERE id=?", (order_id,))
-            c.execute(
-                "UPDATE accumulated_beznal SET total_amount=total_amount-?, last_updated=? WHERE driver_id=1",
-                (beznal, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-            )
+            c.execute("UPDATE accumulated_beznal SET total_amount=total_amount-?,last_updated=? WHERE driver_id=1",
+                      (row[0] or 0.0, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
             conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
+    except Exception as e: conn.rollback(); raise e
+    finally: conn.close()
 
-
-def update_order_and_adjust_beznal(order_id, order_type, amount, tips, commission, total, beznal_added):
-    conn = get_db_connection()
-    c = conn.cursor()
+def update_order_and_adjust_beznal(order_id, otype, amount, tips, commission, total, beznal_added):
+    conn = get_db(); c = conn.cursor()
     try:
         c.execute("SELECT beznal_added FROM orders WHERE id=?", (order_id,))
-        old = c.fetchone()
-        old_beznal = old[0] if old else 0.0
-        c.execute(
-            "UPDATE orders SET type=?, amount=?, tips=?, commission=?, total=?, beznal_added=? WHERE id=?",
-            (order_type, amount, tips, commission, total, beznal_added, order_id)
-        )
-        diff = beznal_added - old_beznal
-        c.execute(
-            "UPDATE accumulated_beznal SET total_amount=total_amount+?, last_updated=? WHERE driver_id=1",
-            (diff, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-        )
+        old = c.fetchone(); old_bez = old[0] if old else 0.0
+        c.execute("UPDATE orders SET type=?,amount=?,tips=?,commission=?,total=?,beznal_added=? WHERE id=?",
+                  (otype, amount, tips, commission, total, beznal_added, order_id))
+        c.execute("UPDATE accumulated_beznal SET total_amount=total_amount+?,last_updated=? WHERE driver_id=1",
+                  (beznal_added - old_bez, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
+    except Exception as e: conn.rollback(); raise e
+    finally: conn.close()
 
 def get_shift_totals(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT type, SUM(total - tips) FROM orders WHERE shift_id=? GROUP BY type", (shift_id,))
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT type,SUM(total-tips) FROM orders WHERE shift_id=? GROUP BY type", (shift_id,))
     by_type = dict(c.fetchall())
     c.execute("SELECT SUM(tips) FROM orders WHERE shift_id=?", (shift_id,))
-    tips = c.fetchone()[0] or 0.0
-    conn.close()
-    by_type["чаевые"] = tips
-    return by_type
-
+    by_type["чаевые"] = c.fetchone()[0] or 0.0; conn.close(); return by_type
 
 def get_shift_orders(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "SELECT id, type, amount, tips, commission, total, beznal_added, order_time "
-        "FROM orders WHERE shift_id=? ORDER BY id DESC",
-        (shift_id,)
-    )
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT id,type,amount,tips,commission,total,beznal_added,order_time FROM orders WHERE shift_id=? ORDER BY id DESC", (shift_id,))
+    rows = c.fetchall(); conn.close(); return rows
 
 def get_last_fuel_params():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "SELECT fuel_liters, km, fuel_price FROM shifts "
-        "WHERE is_open=0 AND km>0 AND fuel_price>0 ORDER BY closed_at DESC LIMIT 1"
-    )
-    row = c.fetchone()
-    conn.close()
-    if row and row[0] and row[1]:
-        return (row[0] / row[1]) * 100, float(row[2] or 55.0)
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT fuel_liters,km,fuel_price FROM shifts WHERE is_open=0 AND km>0 AND fuel_price>0 ORDER BY closed_at DESC LIMIT 1")
+    row = c.fetchone(); conn.close()
+    if row and row[0] and row[1]: return (row[0]/row[1])*100, float(row[2] or 55.0)
     return 8.0, 55.0
-
 
 # ===== РАСХОДЫ =====
 def add_extra_expense(shift_id, amount, description):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO extra_expenses (shift_id, amount, description, created_at) VALUES (?, ?, ?, ?)",
-        (shift_id, amount, description, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    conn.commit()
-    conn.close()
-
+    conn = get_db(); c = conn.cursor()
+    c.execute("INSERT INTO extra_expenses (shift_id,amount,description,created_at) VALUES (?,?,?,?)",
+              (shift_id, amount, description, datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit(); conn.close()
 
 def get_extra_expenses(shift_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        "SELECT id, amount, description FROM extra_expenses WHERE shift_id=? ORDER BY id",
-        (shift_id,)
-    )
-    rows = c.fetchall()
-    conn.close()
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT id,amount,description FROM extra_expenses WHERE shift_id=? ORDER BY id", (shift_id,))
+    rows = c.fetchall(); conn.close()
     return [{"id": r[0], "amount": r[1] or 0.0, "description": r[2] or ""} for r in rows]
 
-
-def delete_extra_expense(expense_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM extra_expenses WHERE id=?", (expense_id,))
-    conn.commit()
-    conn.close()
-
+def delete_extra_expense(eid):
+    conn = get_db(); c = conn.cursor()
+    c.execute("DELETE FROM extra_expenses WHERE id=?", (eid,)); conn.commit(); conn.close()
 
 def get_total_extra_expenses(shift_id) -> float:
-    conn = get_db_connection()
-    c = conn.cursor()
+    conn = get_db(); c = conn.cursor()
     c.execute("SELECT SUM(amount) FROM extra_expenses WHERE shift_id=?", (shift_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] or 0.0
+    row = c.fetchone(); conn.close(); return row[0] or 0.0
 
-
-# ===== БЭКАПЫ =====
+# ===== ЛОКАЛЬНЫЕ БЭКАПЫ =====
 def create_backup() -> str:
-    backup_dir = get_backup_dir()
-    ts = datetime.now(MOSCOW_TZ).strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(backup_dir, f"taxi_{st.session_state.get('username', 'u')}_{ts}.db")
-    shutil.copy2(get_current_db_name(), path)
-    return path
-
+    backup_dir = get_backup_dir(); ts = datetime.now(MOSCOW_TZ).strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(backup_dir, f"taxi_{st.session_state.get('username','u')}_{ts}.db")
+    shutil.copy2(get_current_db_name(), path); return path
 
 def list_backups():
     backup_dir = get_backup_dir()
-    if not os.path.exists(backup_dir):
-        return []
+    if not os.path.exists(backup_dir): return []
     result = []
     for f in os.listdir(backup_dir):
         if f.endswith(".db"):
-            path = os.path.join(backup_dir, f)
-            stat = os.stat(path)
-            result.append({
-                "name": f, "path": path,
-                "time": datetime.fromtimestamp(stat.st_mtime),
-                "size": stat.st_size / 1024
-            })
+            path = os.path.join(backup_dir, f); stat = os.stat(path)
+            result.append({"name": f, "path": path,
+                           "time": datetime.fromtimestamp(stat.st_mtime),
+                           "size": stat.st_size / 1024})
     return sorted(result, key=lambda x: x["time"], reverse=True)
 
-
 def restore_from_backup(backup_path: str):
-    if not os.path.exists(backup_path):
-        raise FileNotFoundError(f"Файл не найден: {backup_path}")
-    create_backup()  # сначала бэкапим текущее
-    db_path = get_current_db_name()
-    shutil.copy2(backup_path, db_path)
-    st.cache_data.clear()
-
+    if not os.path.exists(backup_path): raise FileNotFoundError(f"Не найден: {backup_path}")
+    create_backup(); shutil.copy2(backup_path, get_current_db_name()); st.cache_data.clear()
 
 def upload_and_restore_backup(file) -> bool:
-    """Восстановление из загруженного файла. Возвращает True при успехе."""
-    if not file:
-        return False
+    if not file: return False
     db_path = get_current_db_name()
-    # Сначала бэкапим текущую БД
     try:
-        if os.path.exists(db_path):
-            create_backup()
-    except Exception:
-        pass
-    # Пишем загруженный файл напрямую в db_path
+        if os.path.exists(db_path): create_backup()
+    except Exception: pass
     raw = file.read()
-    with open(db_path, "wb") as f:
-        f.write(raw)
-    # Проверяем что файл валидный sqlite
+    with open(db_path, "wb") as f: f.write(raw)
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("SELECT name FROM sqlite_master LIMIT 1")
-        conn.close()
-    except Exception as e:
-        raise ValueError(f"Файл не является базой данных SQLite: {e}")
-    st.cache_data.clear()
-    return True
+        conn = sqlite3.connect(db_path); conn.execute("SELECT name FROM sqlite_master LIMIT 1"); conn.close()
+    except Exception as e: raise ValueError(f"Не SQLite: {e}")
+    st.cache_data.clear(); return True
 
-
-# ===== ЯНДЕКС ДИСК БЭКАП (REST API) =====
-YADISK_API = "https://cloud-api.yandex.net/v1/disk"
-YADISK_ROOT = "disk:/jet"          # корневая папка
-
-
-def _yadisk_backup_path(username: str, date_str: str) -> str:
-    """Путь файла: disk:/jet/<username>/backup_<date>.db"""
-    safe = "".join(c for c in username if c.isalnum() or c in ("_", "-")) or "user"
-    return f"{YADISK_ROOT}/{safe}/backup_{date_str}.db"
-
-
-def _yadisk_user_dir(username: str) -> str:
-    safe = "".join(c for c in username if c.isalnum() or c in ("_", "-")) or "user"
-    return f"{YADISK_ROOT}/{safe}"
-
-
+# ===== ЯНДЕКС ДИСК =====
 def get_yadisk_token() -> str:
-    """Читает OAuth-токен Яндекс Диска из secrets или session_state."""
     token = ""
-    try:
-        token = st.secrets.get("YADISK_TOKEN", "")
-    except Exception:
-        pass
+    try: token = st.secrets.get("YADISK_TOKEN", "")
+    except Exception: pass
     return str(st.session_state.get("yadisk_token", token)).strip()
 
+def _yadisk_user_dir(username: str) -> str:
+    safe = "".join(c for c in username if c.isalnum() or c in ("_","-")) or "user"
+    return f"{YADISK_ROOT}/{safe}"
 
-def _yadisk_api(method: str, url: str, token: str,
-                data=None, params: dict = None, timeout: int = 30) -> tuple:
-    """Выполняет запрос к REST API Яндекс Диска. Возвращает (status, dict_or_bytes)."""
-    import urllib.request
-    import urllib.parse
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
+def _yadisk_backup_path(username: str, date_str: str) -> str:
+    return f"{_yadisk_user_dir(username)}/backup_{date_str}.db"
+
+def _yadisk_api(method: str, url: str, token: str, data=None, params: dict = None, timeout: int = 30) -> tuple:
+    if params: url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"OAuth {token}")
     req.add_header("Accept", "application/json")
-    if data:
-        req.add_header("Content-Type", "application/octet-stream")
+    if data: req.add_header("Content-Type", "application/octet-stream")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
-            try:
-                return resp.status, json.loads(raw)
-            except Exception:
-                return resp.status, raw
+            try: return resp.status, json.loads(raw)
+            except: return resp.status, raw
     except Exception as e:
         code = getattr(e, "code", 0)
-        try:
-            body = e.read()
-            return code, json.loads(body)
-        except Exception:
-            return code, {"message": str(e)}
+        try: return code, json.loads(e.read())
+        except: return code, {"message": str(e)}
 
+def yadisk_check_token(token: str) -> bool:
+    if not token: return False
+    try:
+        req = urllib.request.Request("https://cloud-api.yandex.net/v1/disk",
+                                     headers={"Authorization": f"OAuth {token}"})
+        with urllib.request.urlopen(req, timeout=5) as r: return r.status == 200
+    except: return False
 
 def yadisk_upload_backup(token: str, shift_date: str = None) -> bool:
-    """Загружает .db файл на Яндекс Диск: jet/<user>/backup_<date>.db"""
-    import urllib.request
     db_path = get_current_db_name()
-    if not os.path.exists(db_path):
-        st.error("❌ База данных не найдена")
-        return False
-    if not token:
-        st.error("❌ Не задан токен Яндекс Диска")
-        return False
-
+    if not os.path.exists(db_path): st.error("❌ БД не найдена"); return False
+    if not token: st.error("❌ Нет токена"); return False
     username = st.session_state.get("username", "unknown")
     date_str = shift_date or datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
     remote_path = _yadisk_backup_path(username, date_str)
-    user_dir = _yadisk_user_dir(username)
-
-    # Создаём папки: сначала jet/, потом jet/<user>/
-    for folder in [YADISK_ROOT, user_dir]:
-        _yadisk_api("PUT", f"{YADISK_API}/resources", token,
-                    params={"path": folder})
-
-    # Получаем URL для загрузки
-    status, resp = _yadisk_api(
-        "GET", f"{YADISK_API}/resources/upload", token,
-        params={"path": remote_path, "overwrite": "true"}
-    )
+    for folder in [YADISK_ROOT, _yadisk_user_dir(username)]:
+        _yadisk_api("PUT", f"{YADISK_API}/resources", token, params={"path": folder})
+    status, resp = _yadisk_api("GET", f"{YADISK_API}/resources/upload", token,
+                                params={"path": remote_path, "overwrite": "true"})
     if status != 200:
         msg = resp.get("message", str(resp)) if isinstance(resp, dict) else str(resp)
-        st.error(f"❌ Не удалось получить URL загрузки (код {status}): {msg}")
-        return False
-
+        st.error(f"❌ Ошибка получения URL (код {status}): {msg}"); return False
     upload_url = resp.get("href") if isinstance(resp, dict) else None
-    if not upload_url:
-        st.error("❌ Яндекс не вернул URL для загрузки")
-        return False
-
-    with open(db_path, "rb") as f:
-        db_bytes = f.read()
-
+    if not upload_url: st.error("❌ Нет URL загрузки"); return False
+    with open(db_path, "rb") as f: db_bytes = f.read()
     req = urllib.request.Request(upload_url, data=db_bytes, method="PUT")
     req.add_header("Content-Type", "application/octet-stream")
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            ok = r.status in (200, 201, 202, 204)
-            return ok
+        with urllib.request.urlopen(req, timeout=120) as r: return r.status in (200,201,202,204)
     except Exception as e:
-        code = getattr(e, "code", 0)
-        st.error(f"❌ Ошибка загрузки файла (код {code}): {e}")
-        return False
-
+        st.error(f"❌ Ошибка загрузки: {e}"); return False
 
 def yadisk_list_backups(token: str) -> list:
-    """Возвращает список бэкапов текущего пользователя на Яндекс Диске."""
-    if not token:
-        return []
+    if not token: return []
     username = st.session_state.get("username", "unknown")
     user_dir = _yadisk_user_dir(username)
-    status, resp = _yadisk_api(
-        "GET", f"{YADISK_API}/resources", token,
-        params={"path": user_dir, "limit": 100, "fields": "_embedded.items.name,_embedded.items.path,_embedded.items.modified,_embedded.items.size"}
-    )
-    if status != 200:
-        return []
+    status, resp = _yadisk_api("GET", f"{YADISK_API}/resources", token,
+                                params={"path": user_dir, "limit": 100,
+                                        "fields": "_embedded.items.name,_embedded.items.path,_embedded.items.modified,_embedded.items.size"})
+    if status != 200: return []
     items = resp.get("_embedded", {}).get("items", []) if isinstance(resp, dict) else []
     result = []
     for item in items:
@@ -711,217 +462,162 @@ def yadisk_list_backups(token: str) -> list:
             try:
                 dt = datetime.fromisoformat(modified.replace("Z", "+00:00"))
                 modified = dt.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y %H:%M")
-            except Exception:
-                pass
-            result.append({
-                "name": item["name"],
-                "path": item["path"],
-                "modified": modified,
-                "size_kb": (item.get("size") or 0) // 1024,
-            })
+            except: pass
+            result.append({"name": item["name"], "path": item["path"],
+                           "modified": modified, "size_kb": (item.get("size") or 0) // 1024})
     return sorted(result, key=lambda x: x["name"], reverse=True)
 
-
 def yadisk_download_backup(token: str, remote_path: str = None) -> bool:
-    """Скачивает указанный (или последний) бэкап с Яндекс Диска."""
-    import urllib.request
-    if not token:
-        st.error("❌ Не задан токен Яндекс Диска")
-        return False
-
-    # Если путь не указан — берём последний файл пользователя
+    if not token: st.error("❌ Нет токена"); return False
     if not remote_path:
         backups = yadisk_list_backups(token)
-        if not backups:
-            st.warning("⚠️ Нет бэкапов на Яндекс Диске")
-            return False
+        if not backups: st.warning("⚠️ Нет бэкапов"); return False
         remote_path = backups[0]["path"]
-
-    status, resp = _yadisk_api(
-        "GET", f"{YADISK_API}/resources/download", token,
-        params={"path": remote_path}
-    )
-    if status == 404:
-        st.warning("⚠️ Файл не найден на Яндекс Диске")
-        return False
+    status, resp = _yadisk_api("GET", f"{YADISK_API}/resources/download", token,
+                                params={"path": remote_path})
+    if status == 404: st.warning("⚠️ Файл не найден"); return False
     if status != 200:
         msg = resp.get("message", str(resp)) if isinstance(resp, dict) else str(resp)
-        st.error(f"❌ Не удалось получить URL скачивания (код {status}): {msg}")
-        return False
-
+        st.error(f"❌ Ошибка скачивания (код {status}): {msg}"); return False
     download_url = resp.get("href") if isinstance(resp, dict) else None
-    if not download_url:
-        st.error("❌ Яндекс не вернул URL для скачивания")
-        return False
-
+    if not download_url: st.error("❌ Нет URL скачивания"); return False
     try:
-        with urllib.request.urlopen(download_url, timeout=120) as r:
-            db_bytes = r.read()
-    except Exception as e:
-        st.error(f"❌ Ошибка скачивания: {e}")
-        return False
-
-    if len(db_bytes) < 100:
-        st.error("❌ Скачанный файл слишком мал")
-        return False
-
+        with urllib.request.urlopen(download_url, timeout=120) as r: db_bytes = r.read()
+    except Exception as e: st.error(f"❌ Ошибка: {e}"); return False
+    if len(db_bytes) < 100: st.error("❌ Файл слишком мал"); return False
     db_path = get_current_db_name()
     try:
-        if os.path.exists(db_path):
-            create_backup()
-    except Exception:
-        pass
-
-    with open(db_path, "wb") as f:
-        f.write(db_bytes)
-
+        if os.path.exists(db_path): create_backup()
+    except: pass
+    with open(db_path, "wb") as f: f.write(db_bytes)
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("SELECT name FROM sqlite_master LIMIT 1")
-        conn.close()
+        conn = sqlite3.connect(db_path); conn.execute("SELECT name FROM sqlite_master LIMIT 1"); conn.close()
+    except Exception as e: raise ValueError(f"Файл повреждён: {e}")
+    st.cache_data.clear(); return True
+
+def yadisk_delete_backup(token: str, remote_path: str) -> bool:
+    if not token or not remote_path: return False
+    url = f"{YADISK_API}/resources?path={urllib.parse.quote(remote_path)}&permanently=true"
+    req = urllib.request.Request(url, method="DELETE")
+    req.add_header("Authorization", f"OAuth {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r: return r.status in (200,204)
     except Exception as e:
-        raise ValueError(f"Скачанный файл повреждён: {e}")
+        return getattr(e, "code", 0) in (200, 204)
 
-    st.cache_data.clear()
-    return True
+# ===== UI КОМПОНЕНТЫ =====
+def render_profile_header():
+    """Шапка: фото/аватар слева, имя + позывной по центру, безнал справа."""
+    profile = get_user_profile()
+    acc = get_accumulated_beznal()
+    font_size = profile.get("font_size", 28)
+    driver_name = profile.get("name") or st.session_state.get("username", "")
+    driver_number = profile.get("number", "")
+    photo_b64 = profile.get("photo", "")
 
+    col_photo, col_info, col_beznal = st.columns([1, 3, 2])
+    with col_photo:
+        if photo_b64:
+            st.markdown(
+                f'<img src="data:image/jpeg;base64,{photo_b64}" '
+                f'style="width:70px;height:70px;border-radius:50%;object-fit:cover;margin-top:4px;">',
+                unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '<div style="width:70px;height:70px;border-radius:50%;background:#e2e8f0;'
+                'display:flex;align-items:center;justify-content:center;font-size:2rem;">👤</div>',
+                unsafe_allow_html=True)
+    with col_info:
+        display_number = driver_number if driver_number else "—"
+        st.markdown(
+            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;"
+            f"letter-spacing:.06em;margin-bottom:3px;'>🚕 Водитель</div>"
+            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:8px;'>"
+            f"<span style='font-size:{font_size}px;font-weight:700;line-height:1.2;'>{driver_name}</span>"
+            f"<span style='font-size:0.8em;font-weight:500;color:#64748b;background:#f1f5f9;"
+            f"border-radius:6px;padding:3px 10px;white-space:nowrap;'>позывной "
+            f"<b style='font-size:1.1em;color:#1e293b;'>{display_number}</b></span>"
+            f"</div>",
+            unsafe_allow_html=True)
+    with col_beznal:
+        st.metric("💳 Безнал", f"{acc:.0f} ₽")
 
-def yadisk_get_backup_info(token: str) -> dict:
-    """Возвращает инфо о последнем бэкапе пользователя."""
-    if not token:
-        return {}
-    backups = yadisk_list_backups(token)
-    if backups:
-        b = backups[0]
-        return {"modified": b["modified"], "size_kb": b["size_kb"], "name": b["name"]}
-    return {}
-
-
-# ===== UI: ВХОД / РЕГИСТРАЦИЯ =====
+# ===== UI: ВХОД =====
 def show_login_page():
     st.markdown("""
-    <div style="text-align:center; padding: 2rem 0 1rem;">
-        <div style="font-size: 4rem;">🚕</div>
+    <div style="text-align:center;padding:2rem 0 1rem;">
+        <div style="font-size:4rem;">🚕</div>
         <h1 style="margin:0;">Taxi Shift Manager</h1>
         <p style="color:#64748b;">Учёт смен и доходов</p>
-    </div>
-    """, unsafe_allow_html=True)
-
+    </div>""", unsafe_allow_html=True)
     u = st.text_input("👤 Логин", placeholder="Введите логин")
     p = st.text_input("🔑 Пароль", type="password", placeholder="Введите пароль")
-
-    col1, col2 = st.columns(2)
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         if st.button("🚀 Войти", use_container_width=True, type="primary"):
             if authenticate_user(u, p):
                 st.session_state.username = u.strip()
                 st.session_state.page = "main"
-                save_session_to_disk()
-                st.rerun()
-            else:
-                st.error("❌ Неверный логин или пароль")
-    with col2:
+                save_session(); st.rerun()
+            else: st.error("❌ Неверный логин или пароль")
+    with c2:
         if st.button("➕ Регистрация", use_container_width=True):
-            if register_user(u, p):
-                st.success("✅ Зарегистрирован! Войдите.")
-            else:
-                st.error("❌ Логин уже занят или ошибка")
-
+            if register_user(u, p): st.success("✅ Зарегистрирован! Войдите.")
+            else: st.error("❌ Логин занят или ошибка")
 
 # ===== UI: ГЛАВНАЯ =====
 def show_main_page():
     check_and_create_tables()
+    render_profile_header()
     open_shift_data = get_open_shift()
-
-    # Шапка с безналом
-    acc = get_accumulated_beznal()
-    col_title, col_beznal = st.columns([2, 1])
-    col_title.markdown(f"## 👨‍💼 {st.session_state.username}")
-    col_beznal.metric("💳 Безнал", f"{acc:.0f} ₽")
 
     if not open_shift_data:
         st.info("ℹ️ Нет открытой смены")
         with st.expander("📅 Открыть смену", expanded=True):
             selected_date = st.date_input("📅 Дата", value=date.today())
             if st.button("✅ Открыть смену", use_container_width=True, type="primary"):
-                open_shift(selected_date.strftime("%Y-%m-%d"))
-                st.rerun()
+                open_shift(selected_date.strftime("%Y-%m-%d")); st.rerun()
         return
 
     shift_id, date_str = open_shift_data
     st.success(f"✅ Смена: **{date_str}**")
 
-    # ===== БЛОК ДОБАВЛЕНИЯ ЗАКАЗА =====
+    # ===== ДОБАВИТЬ ЗАКАЗ =====
     with st.expander("➕ Добавить заказ", expanded=True):
         col1, col2 = st.columns([3, 2])
         with col1:
-            amount_str = st.text_input(
-                "💰 Сумма чеком (₽)",
-                placeholder="650",
-                key="order_amount",
-                help="Введите сумму цифрами"
-            )
+            amount_str = st.text_input("💰 Сумма чеком (₽)", placeholder="650", key="order_amount")
         with col2:
             order_type = st.selectbox("💳 Тип", ["нал", "карта"], key="order_type")
-
         tips_str = st.text_input("💡 Чаевые (₽)", placeholder="0", value="0", key="order_tips")
-
-        # Предпросмотр расчёта
+        # Предпросмотр
         try:
-            prev_amount = float(amount_str.replace(",", ".")) if amount_str else 0.0
-            prev_tips = float(tips_str.replace(",", ".")) if tips_str else 0.0
-            if prev_amount > 0:
+            pa = float(amount_str.replace(",", ".")) if amount_str else 0.0
+            pt = float(tips_str.replace(",", ".")) if tips_str else 0.0
+            if pa > 0:
                 if order_type == "нал":
-                    prev_comm = prev_amount * (1 - RATE_NAL)
-                    prev_total = prev_amount + prev_tips
-                    prev_bez = -prev_comm
-                    st.caption(f"📊 Комиссия: **{prev_comm:.0f} ₽** | На руки: **{prev_total:.0f} ₽** | Безнал: **{prev_bez:+.0f} ₽**")
+                    pc = pa * (1 - RATE_NAL)
+                    st.caption(f"📊 Комиссия: **{pc:.0f} ₽** | На руки: **{pa + pt:.0f} ₽** | Безнал: **{-pc:+.0f} ₽**")
                 else:
-                    prev_final = prev_amount * RATE_CARD
-                    prev_comm = prev_amount - prev_final
-                    prev_total = prev_final + prev_tips
-                    st.caption(f"📊 Комиссия: **{prev_comm:.0f} ₽** | На руки: **{prev_total:.0f} ₽** | Безнал: **+{prev_final:.0f} ₽**")
-        except Exception:
-            pass
+                    pf = pa * RATE_CARD
+                    st.caption(f"📊 Комиссия: **{pa - pf:.0f} ₽** | На руки: **{pf + pt:.0f} ₽** | Безнал: **+{pf:.0f} ₽**")
+        except: pass
 
         if st.button("✅ Добавить заказ", use_container_width=True, type="primary", key="btn_add_order"):
-            # ИСПРАВЛЕНИЕ: сначала парсим, только потом добавляем
-            parse_ok = False
-            amount = 0.0
-            tips = 0.0
             try:
                 amount = float(str(amount_str).replace(",", ".").strip())
                 tips = float(str(tips_str).replace(",", ".").strip()) if tips_str else 0.0
-                if amount <= 0:
-                    st.error("❌ Сумма должна быть больше 0")
+                if amount <= 0: st.error("❌ Сумма должна быть больше 0")
                 else:
-                    parse_ok = True
+                    order_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
+                    if order_type == "нал":
+                        commission = amount * (1 - RATE_NAL); total = amount + tips; beznal_added = -commission; db_type = "нал"
+                    else:
+                        final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
+                    add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
+                    st.rerun()
             except (ValueError, AttributeError):
                 st.error("❌ Введите корректное число (например: 650)")
-
-            if parse_ok:
-                order_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
-                if order_type == "нал":
-                    commission = amount * (1 - RATE_NAL)
-                    total = amount + tips
-                    beznal_added = -commission
-                    db_type = "нал"
-                else:
-                    final = amount * RATE_CARD
-                    commission = amount - final
-                    total = final + tips
-                    beznal_added = final
-                    db_type = "карта"
-                try:
-                    add_order_and_update_beznal(
-                        shift_id, db_type, amount, tips,
-                        commission, total, beznal_added, order_time
-                    )
-                    st.success(f"✅ Добавлен заказ {amount:.0f} ₽ ({db_type})")
-                    # Обновляем безнал в шапке немедленно
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Ошибка сохранения: {e}")
 
     # ===== СПИСОК ЗАКАЗОВ =====
     orders = get_shift_orders(shift_id)
@@ -929,71 +625,42 @@ def show_main_page():
 
     if orders:
         st.markdown("### 📋 Заказы смены")
-        for order_row in orders:
-            order_id, typ, am, ti, _, tot, bez, tm = order_row
-            edit_active = st.session_state.get(f"editing_{order_id}", False)
-
-            if edit_active:
+        for order_id, typ, am, ti, _, tot, bez, tm in orders:
+            if st.session_state.get(f"editing_{order_id}"):
                 with st.container():
-                    st.markdown(f"**✏️ Редактирование #{order_id}**")
+                    st.markdown(f"**✏️ Заказ #{order_id}**")
                     e_amt = st.number_input("💰 Сумма", value=float(am), min_value=0.1, key=f"e_amt_{order_id}")
-                    e_type = st.selectbox("💳 Тип", ["нал", "карта"],
-                                         index=0 if typ == "нал" else 1, key=f"e_type_{order_id}")
+                    e_type = st.selectbox("💳 Тип", ["нал","карта"], index=0 if typ=="нал" else 1, key=f"e_type_{order_id}")
                     e_tips = st.number_input("💡 Чаевые", value=float(ti or 0), min_value=0.0, key=f"e_tips_{order_id}")
-                    if e_type == "нал":
-                        e_comm = e_amt * (1 - RATE_NAL)
-                        e_tot = e_amt + e_tips
-                        e_bez = -e_comm
-                    else:
-                        e_f = e_amt * RATE_CARD
-                        e_comm = e_amt - e_f
-                        e_tot = e_f + e_tips
-                        e_bez = e_f
+                    if e_type == "нал": e_comm=e_amt*(1-RATE_NAL); e_tot=e_amt+e_tips; e_bez=-e_comm
+                    else: ef=e_amt*RATE_CARD; e_comm=e_amt-ef; e_tot=ef+e_tips; e_bez=ef
                     c1, c2 = st.columns(2)
                     if c1.button("💾 Сохранить", key=f"save_{order_id}", use_container_width=True, type="primary"):
                         update_order_and_adjust_beznal(order_id, e_type, e_amt, e_tips, e_comm, e_tot, e_bez)
-                        st.session_state.pop(f"editing_{order_id}", None)
-                        st.cache_data.clear()
-                        st.rerun()
+                        st.session_state.pop(f"editing_{order_id}", None); st.cache_data.clear(); st.rerun()
                     if c2.button("❌ Отмена", key=f"cancel_{order_id}", use_container_width=True):
-                        st.session_state.pop(f"editing_{order_id}", None)
-                        st.rerun()
+                        st.session_state.pop(f"editing_{order_id}", None); st.rerun()
                 continue
 
-            # Строка заказа
             icon = "💵" if typ == "нал" else "💳"
-            with st.container():
-                st.markdown(
-                    f"{icon} **{typ}** &nbsp;|&nbsp; {tm or ''} &nbsp;|&nbsp; "
-                    f"чек: **{am:.0f} ₽** → **{tot:.0f} ₽** &nbsp;|&nbsp; безнал: **{bez:+.0f} ₽**"
-                )
-                cols = st.columns(2)
-                if cols[0].button("✏️ Изменить", key=f"edit_{order_id}", use_container_width=True):
-                    st.session_state[f"editing_{order_id}"] = True
-                    st.rerun()
-
-                conf_key = f"conf_{order_id}"
-                if st.session_state.get(conf_key):
-                    c1, c2 = cols[1].columns(2)
-                    if c1.button("✅", key=f"yes_{order_id}", use_container_width=True):
-                        delete_order_and_update_beznal(order_id)
-                        st.session_state.pop(conf_key, None)
-                        st.rerun()
-                    if c2.button("❌", key=f"no_{order_id}", use_container_width=True):
-                        st.session_state.pop(conf_key, None)
-                        st.rerun()
-                else:
-                    if cols[1].button("🗑️ Удалить", key=f"del_{order_id}", use_container_width=True):
-                        st.session_state[conf_key] = True
-                        st.rerun()
+            st.markdown(f"{icon} **{typ}** | {tm or ''} | чек: **{am:.0f}₽** → **{tot:.0f}₽** | безнал: **{bez:+.0f}₽**")
+            cols = st.columns(2)
+            if cols[0].button("✏️ Изменить", key=f"edit_{order_id}", use_container_width=True):
+                st.session_state[f"editing_{order_id}"] = True; st.rerun()
+            conf_key = f"conf_{order_id}"
+            if st.session_state.get(conf_key):
+                c1, c2 = cols[1].columns(2)
+                if c1.button("✅", key=f"yes_{order_id}", use_container_width=True):
+                    delete_order_and_update_beznal(order_id); st.session_state.pop(conf_key, None); st.rerun()
+                if c2.button("❌", key=f"no_{order_id}", use_container_width=True):
+                    st.session_state.pop(conf_key, None); st.rerun()
+            else:
+                if cols[1].button("🗑️ Удалить", key=f"del_{order_id}", use_container_width=True):
+                    st.session_state[conf_key] = True; st.rerun()
             st.divider()
 
-        # Итого смены
-        nal_sum = totals.get("нал", 0)
-        card_sum = totals.get("карта", 0)
-        tips_sum = totals.get("чаевые", 0)
+        nal_sum = totals.get("нал", 0); card_sum = totals.get("карта", 0); tips_sum = totals.get("чаевые", 0)
         total_income = nal_sum + card_sum + tips_sum
-
         st.markdown("### 💰 Итог смены")
         c1, c2, c3 = st.columns(3)
         c1.metric("💵 Нал + чаевые", f"{nal_sum + tips_sum:.0f} ₽")
@@ -1005,23 +672,18 @@ def show_main_page():
     # ===== РАСХОДЫ =====
     total_extra = get_total_extra_expenses(shift_id)
     with st.expander(f"💸 Расходы ({total_extra:.0f} ₽)", expanded=False):
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            exp_desc = st.selectbox("📝 Тип", POPULAR_EXPENSES, key="exp_desc")
-        with col2:
-            exp_amt = st.number_input("₽", min_value=0.0, step=50.0, value=100.0, key="exp_amt")
+        c1, c2 = st.columns([2, 1])
+        with c1: exp_desc = st.selectbox("📝 Тип", POPULAR_EXPENSES, key="exp_desc")
+        with c2: exp_amt = st.number_input("₽", min_value=0.0, step=50.0, value=100.0, key="exp_amt")
         if st.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp"):
-            add_extra_expense(shift_id, exp_amt, exp_desc)
-            st.rerun()
-
+            add_extra_expense(shift_id, exp_amt, exp_desc); st.rerun()
         for exp in get_extra_expenses(shift_id):
             c1, c2 = st.columns([4, 1])
             c1.markdown(f"**{exp['description']}** — {exp['amount']:.0f} ₽")
             if c2.button("🗑️", key=f"del_exp_{exp['id']}", use_container_width=True):
-                delete_extra_expense(exp["id"])
-                st.rerun()
+                delete_extra_expense(exp["id"]); st.rerun()
 
-    # ===== ИТОГ СМЕНЫ =====
+    # ===== ИТОГ =====
     st.divider()
     profit = total_income - total_extra
     c1, c2, c3 = st.columns(3)
@@ -1034,477 +696,390 @@ def show_main_page():
         last_cons, last_price = get_last_fuel_params()
         km = st.number_input("🛣️ Пробег (км)", value=100, min_value=0, key="km_close")
         c1, c2 = st.columns(2)
-        with c1:
-            cons = st.number_input("⛽ Расход л/100км", value=float(last_cons), step=0.5, key="cons_close")
-        with c2:
-            price = st.number_input("💰 Цена топлива ₽/л", value=float(last_price), step=1.0, key="fuel_close")
+        with c1: cons = st.number_input("⛽ Расход л/100км", value=float(last_cons), step=0.5, key="cons_close")
+        with c2: price = st.number_input("💰 Цена топлива ₽/л", value=float(last_price), step=1.0, key="fuel_close")
         if km > 0 and cons > 0:
             liters = (km / 100) * cons
             st.info(f"🛢️ {liters:.1f} л × {price:.0f} ₽ = **{liters * price:.0f} ₽**")
-
         if not st.session_state.get("confirm_close"):
             if st.button("🔒 Закрыть смену", use_container_width=True, type="primary"):
-                st.session_state.confirm_close = True
-                st.rerun()
+                st.session_state.confirm_close = True; st.rerun()
         else:
             st.warning("⚠️ Подтвердите закрытие")
             c1, c2 = st.columns(2)
             if c1.button("✅ Да, закрыть", use_container_width=True, type="primary"):
                 liters_val = (km / 100) * cons if km > 0 else 0.0
                 close_shift_db(shift_id, km, liters_val, price)
-                st.session_state.pop("confirm_close", None)
-                st.cache_data.clear()
-                # Автобэкап на Яндекс Диск после закрытия смены
+                st.session_state.pop("confirm_close", None); st.cache_data.clear()
+                # Автобэкап на Яндекс Диск
                 token = get_yadisk_token()
                 if token:
                     try:
                         if yadisk_upload_backup(token, shift_date=date_str):
-                            st.success(f"✅ Смена закрыта. Бэкап сохранён на Яндекс Диск (jet/{st.session_state.get('username')}/backup_{date_str}.db)")
-                        else:
-                            st.warning("⚠️ Смена закрыта, но бэкап на Яндекс Диск не удался")
-                    except Exception as e:
-                        st.warning(f"⚠️ Смена закрыта, ошибка бэкапа: {e}")
-                else:
-                    st.success("✅ Смена закрыта")
+                            st.success(f"✅ Смена закрыта. Бэкап → Яндекс Диск")
+                        else: st.warning("⚠️ Смена закрыта, бэкап не удался")
+                    except Exception as e: st.warning(f"⚠️ Смена закрыта, ошибка бэкапа: {e}")
+                else: st.success("✅ Смена закрыта")
                 st.rerun()
             if c2.button("❌ Отмена", use_container_width=True):
-                st.session_state.pop("confirm_close", None)
-                st.rerun()
-
+                st.session_state.pop("confirm_close", None); st.rerun()
 
 # ===== UI: ОТЧЁТЫ =====
 def show_reports_page():
     st.markdown("## 📊 Отчёты")
     check_and_create_tables()
-
-    if st.button("🔄 Обновить", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-
+    if st.button("🔄 Обновить", use_container_width=True): st.cache_data.clear(); st.rerun()
     try:
-        from pages_imports import (
-            get_available_year_months_cached,
-            get_available_days_cached,
-            get_month_totals_cached,
-            get_day_report_cached,
-            format_month_option,
-            get_month_shifts_details_cached,
-            get_month_statistics,
-        )
-
+        from pages_imports import (get_available_year_months_cached, get_available_days_cached,
+            get_month_totals_cached, get_day_report_cached, format_month_option,
+            get_month_shifts_details_cached, get_month_statistics)
         year_months = get_available_year_months_cached()
-        if not year_months:
-            st.info("ℹ️ Нет закрытых смен с заказами")
-            return
-
-        selected_ym = st.selectbox(
-            "📅 Период", year_months, index=0,
-            format_func=format_month_option
-        )
-
-        # Дневной отчёт
+        if not year_months: st.info("ℹ️ Нет закрытых смен"); return
+        selected_ym = st.selectbox("📅 Период", year_months, index=0, format_func=format_month_option)
         available_days = get_available_days_cached(selected_ym)
         if available_days:
-            weekdays = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-            selected_day = st.selectbox(
-                "📆 День",
-                available_days,
-                format_func=lambda d: f"{d[:10]} ({weekdays[datetime.strptime(d, '%Y-%m-%d').weekday()]})"
-            )
+            weekdays = ["пн","вт","ср","чт","пт","сб","вс"]
+            selected_day = st.selectbox("📆 День", available_days,
+                format_func=lambda d: f"{d[:10]} ({weekdays[datetime.strptime(d,'%Y-%m-%d').weekday()]})")
             dr = get_day_report_cached(selected_day)
             st.markdown(f"### 📋 {selected_day[:10]}")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("💰 Доход", f"{dr['всего']:.0f} ₽")
-            c2.metric("💸 Расходы", f"{(dr['расходы'] + dr['топливо']):.0f} ₽")
-            c3.metric("⛽ Топливо", f"{dr['топливо']:.0f} ₽")
-            c4.metric("📈 Прибыль", f"{dr['прибыль']:.0f} ₽")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("💵 Нал", f"{dr['нал']:.0f} ₽")
-            c2.metric("💳 Карта", f"{dr['карта']:.0f} ₽")
-            c3.metric("💡 Чаевые", f"{dr['чаевые']:.0f} ₽")
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("💰 Доход", f"{dr['всего']:.0f} ₽"); c2.metric("💸 Расходы", f"{(dr['расходы']+dr['топливо']):.0f} ₽")
+            c3.metric("⛽ Топливо", f"{dr['топливо']:.0f} ₽"); c4.metric("📈 Прибыль", f"{dr['прибыль']:.0f} ₽")
+            c1,c2,c3 = st.columns(3)
+            c1.metric("💵 Нал", f"{dr['нал']:.0f} ₽"); c2.metric("💳 Карта", f"{dr['карта']:.0f} ₽"); c3.metric("💡 Чаевые", f"{dr['чаевые']:.0f} ₽")
             st.divider()
-
-        # Месячный отчёт
         st.markdown(f"### 📊 {format_month_option(selected_ym)}")
         totals = get_month_totals_cached(selected_ym)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("💵 Нал", f"{totals.get('нал', 0):.0f} ₽")
-        c2.metric("💳 Карта", f"{totals.get('карта', 0):.0f} ₽")
-        c3.metric("💡 Чаевые", f"{totals.get('чаевые', 0):.0f} ₽")
-        c4.metric("💰 Всего", f"{totals.get('всего', 0):.0f} ₽")
-
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("💵 Нал", f"{totals.get('нал',0):.0f} ₽"); c2.metric("💳 Карта", f"{totals.get('карта',0):.0f} ₽")
+        c3.metric("💡 Чаевые", f"{totals.get('чаевые',0):.0f} ₽"); c4.metric("💰 Всего", f"{totals.get('всего',0):.0f} ₽")
         stats = get_month_statistics(selected_ym)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("🚕 Смен", stats.get("смен", 0))
-        c2.metric("📦 Заказов", stats.get("заказов", 0))
-        c3.metric("📊 Средний чек", f"{stats.get('средний_чек', 0):.0f} ₽")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("⛽ Бензин", f"{stats.get('бензин', 0):.0f} ₽")
-        c2.metric("💸 Расходы", f"{stats.get('расходы', 0):.0f} ₽")
-        c3.metric("📈 Прибыль", f"{stats.get('прибыль', 0):.0f} ₽",
-                  delta=f"{stats.get('рентабельность', 0):.1f}%")
-
+        c1,c2,c3 = st.columns(3)
+        c1.metric("🚕 Смен", stats.get("смен",0)); c2.metric("📦 Заказов", stats.get("заказов",0)); c3.metric("📊 Средний чек", f"{stats.get('средний_чек',0):.0f} ₽")
+        c1,c2,c3 = st.columns(3)
+        c1.metric("⛽ Бензин", f"{stats.get('бензин',0):.0f} ₽"); c2.metric("💸 Расходы", f"{stats.get('расходы',0):.0f} ₽")
+        c3.metric("📈 Прибыль", f"{stats.get('прибыль',0):.0f} ₽", delta=f"{stats.get('рентабельность',0):.1f}%")
         df = get_month_shifts_details_cached(selected_ym)
-        if not df.empty:
-            st.divider()
-            st.dataframe(df, use_container_width=True)
+        if not df.empty: st.divider(); st.dataframe(df, use_container_width=True)
+    except ImportError as e: st.error(f"❌ pages_imports.py: {e}")
+    except Exception as e: st.error(f"❌ Ошибка: {e}")
 
-    except ImportError as e:
-        st.error(f"❌ pages_imports.py: {e}")
-    except Exception as e:
-        st.error(f"❌ Ошибка: {e}")
-
-
-# ===== UI: НАСТРОЙКИ / АДМИНКА =====
+# ===== UI: НАСТРОЙКИ =====
 def show_admin_page():
     st.markdown("## 🔧 Настройки")
-
-    admin_pwd = ""
-    try:
-        admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
-    except Exception:
-        admin_pwd = "changeme"
-
+    admin_pwd = "changeme"
+    try: admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
+    except: pass
     if not st.session_state.get("admin_auth"):
-        pwd = st.text_input("🔑 Пароль администратора", type="password")
+        pwd = st.text_input("🔑 Пароль", type="password")
         if st.button("🔐 Войти", use_container_width=True, type="primary"):
-            if pwd == admin_pwd:
-                st.session_state.admin_auth = True
-                st.rerun()
-            else:
-                st.error("❌ Неверный пароль")
+            if pwd == admin_pwd: st.session_state.admin_auth = True; st.rerun()
+            else: st.error("❌ Неверный пароль")
         return
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📦 Бэкапы", "☁️ Яндекс Диск", "💳 Безнал", "⚠️ Сброс"
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "💾 Бэкап", "💳 Безнал", "👤 Профиль", "👥 Пользователи", "⚠️ Сброс"
     ])
 
-    # ===== TAB 1: БЭКАПЫ =====
+    # ===== TAB 1: БЭКАП (локальный + Яндекс Диск) =====
     with tab1:
-        st.markdown("### 📦 Локальные бэкапы")
-        if st.button("📦 Создать бэкап", use_container_width=True):
-            path = create_backup()
-            st.success(f"✅ {os.path.basename(path)}")
+        tok = get_yadisk_token()
+        token_ok = yadisk_check_token(tok)
 
-        st.markdown("**Восстановить из файла:**")
-        uploaded = st.file_uploader("📁 Загрузить .db файл", type=["db"], key="restore_uploader")
+        # --- Яндекс Диск ---
+        st.markdown("#### ☁️ Яндекс Диск")
+        if token_ok:
+            st.success(f"✅ Подключён · `jet/{st.session_state.get('username')}/backup_<дата>.db`")
+            with st.expander("🔑 Изменить токен", expanded=False):
+                new_tok = st.text_input("OAuth-токен", value=tok, type="password", key="input_yd_token")
+                if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
+                    st.session_state.yadisk_token = new_tok.strip(); st.rerun()
+        else:
+            if tok: st.error("❌ Токен не работает")
+            else: st.warning("⚠️ Токен не задан")
+            with st.expander("ℹ️ Как получить токен", expanded=not tok):
+                st.markdown("""
+Перейдите по ссылке (подставьте ваш ClientID):
+```
+https://oauth.yandex.ru/authorize?response_type=token&client_id=ВАШ_CLIENT_ID
+```
+Скопируйте `access_token=...` и вставьте ниже или в `secrets.toml`:
+```toml
+YADISK_TOKEN = "y0_AgAAAA..."
+```""")
+            new_tok = st.text_input("🔑 OAuth-токен", value=tok, type="password",
+                                     placeholder="y0_AgAAAA...", key="input_yd_token")
+            if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
+                st.session_state.yadisk_token = new_tok.strip(); st.rerun()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("📤 Загрузить сейчас", use_container_width=True, type="primary"):
+                with st.spinner("Загружаю..."):
+                    ds = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+                    if yadisk_upload_backup(tok, shift_date=ds): st.success(f"✅ backup_{ds}.db")
+        with c2:
+            if st.button("📥 Восстановить последний", use_container_width=True):
+                with st.spinner("Скачиваю..."):
+                    try:
+                        if yadisk_download_backup(tok): st.success("✅ Восстановлено!"); st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
+
+        # Список бэкапов на Яндекс Диске
+        st.divider()
+        st.markdown("**📋 Бэкапы на Яндекс Диске:**")
+        if tok:
+            with st.spinner("Загружаю список..."):
+                yd_backups = yadisk_list_backups(tok)
+            if yd_backups:
+                for b in yd_backups:
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    c1.markdown(f"📄 **{b['name']}**  \n📅 {b['modified']} · {b['size_kb']} KB")
+                    if c2.button("📥", key=f"yd_dl_{b['name']}", use_container_width=True, help="Восстановить"):
+                        with st.spinner("Восстанавливаю..."):
+                            try:
+                                if yadisk_download_backup(tok, remote_path=b["path"]):
+                                    st.success(f"✅ {b['name']}"); st.rerun()
+                            except Exception as e: st.error(f"❌ {e}")
+                    if c3.button("🗑️", key=f"yd_del_{b['name']}", use_container_width=True, help="Удалить с Яндекс Диска"):
+                        if yadisk_delete_backup(tok, b["path"]): st.success("✅ Удалён"); st.rerun()
+                        else: st.error("❌ Не удалось удалить")
+            else:
+                st.info("Бэкапов нет. Появятся после закрытия первой смены.")
+        else:
+            st.warning("⚠️ Введите токен")
+
+        # --- Локальные бэкапы ---
+        st.divider()
+        st.markdown("#### 📦 Локальные бэкапы")
+        if st.button("📦 Создать локальный бэкап", use_container_width=True):
+            path = create_backup(); st.success(f"✅ {os.path.basename(path)}")
+
+        uploaded = st.file_uploader("📁 Восстановить из .db файла", type=["db"], key="restore_uploader")
         if uploaded:
             if not st.session_state.get("confirm_restore"):
                 if st.button("📥 Восстановить из файла", use_container_width=True, type="primary"):
-                    st.session_state.confirm_restore = True
-                    st.rerun()
+                    st.session_state.confirm_restore = True; st.rerun()
             else:
-                st.warning("⚠️ Текущая БД будет заменена. Текущий бэкап сохранится автоматически.")
+                st.warning("⚠️ Текущая БД будет заменена (автобэкап создастся)")
                 c1, c2 = st.columns(2)
-                if c1.button("✅ Да, восстановить", use_container_width=True, type="primary"):
+                if c1.button("✅ Да", use_container_width=True, type="primary"):
                     try:
                         upload_and_restore_backup(uploaded)
                         st.session_state.pop("confirm_restore", None)
-                        st.success("✅ База данных восстановлена! Перезагружаю...")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Ошибка: {e}")
+                        st.success("✅ Восстановлено!"); time.sleep(1); st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
                 if c2.button("❌ Отмена", use_container_width=True):
-                    st.session_state.pop("confirm_restore", None)
-                    st.rerun()
+                    st.session_state.pop("confirm_restore", None); st.rerun()
 
-        st.divider()
-        st.markdown("**Список бэкапов:**")
         for b in list_backups():
             with st.container():
                 st.caption(f"📅 {b['time'].strftime('%d.%m.%Y %H:%M')} — {b['size']:.1f} KB")
                 c1, c2, c3 = st.columns(3)
                 with open(b["path"], "rb") as f:
-                    c1.download_button(
-                        "⬇️ Скачать", f.read(), b["name"],
-                        key=f"dl_{b['name']}", use_container_width=True
-                    )
+                    c1.download_button("⬇️ Скачать", f.read(), b["name"], key=f"dl_{b['name']}", use_container_width=True)
                 if c2.button("📥 Откат", key=f"rb_{b['name']}", use_container_width=True):
-                    restore_from_backup(b["path"])
-                    st.success("✅ Восстановлено!")
-                    st.rerun()
+                    restore_from_backup(b["path"]); st.success("✅ Восстановлено!"); st.rerun()
                 if c3.button("🗑️", key=f"xb_{b['name']}", use_container_width=True):
-                    os.remove(b["path"])
-                    st.rerun()
+                    os.remove(b["path"]); st.rerun()
 
-    # ===== TAB 2: ЯНДЕКС ДИСК =====
+    # ===== TAB 2: БЕЗНАЛ =====
     with tab2:
-        st.markdown("### ☁️ Яндекс Диск")
-
-        tok = get_yadisk_token()
-
-        # Проверяем токен — пробуем получить инфо о диске
-        token_ok = False
-        if tok:
-            try:
-                import urllib.request as _ur
-                _req = _ur.Request(
-                    "https://cloud-api.yandex.net/v1/disk",
-                    headers={"Authorization": f"OAuth {tok}"}
-                )
-                with _ur.urlopen(_req, timeout=5) as _r:
-                    token_ok = _r.status == 200
-            except Exception:
-                token_ok = False
-
-        # Если токен работает — показываем статус и прячем форму
-        if token_ok:
-            st.success("✅ Яндекс Диск подключён")
-            st.caption(f"Структура: `jet/{st.session_state.get('username')}/backup_<дата>.db`")
-            with st.expander("🔑 Изменить токен", expanded=False):
-                yd_token = st.text_input(
-                    "OAuth-токен", value=tok, type="password",
-                    key="input_yd_token"
-                )
-                if st.button("💾 Сохранить", use_container_width=True, key="save_tok"):
-                    st.session_state.yadisk_token = yd_token.strip()
-                    st.success("✅ Сохранено")
-                    st.rerun()
-        else:
-            # Токена нет или не работает
-            if tok:
-                st.error("❌ Токен не работает — введите новый")
-            else:
-                st.warning("⚠️ Токен не задан")
-
-            with st.expander("ℹ️ Как получить токен", expanded=False):
-                st.markdown("""
-**1. Перейдите по ссылке** (подставьте ваш ClientID):
-```
-https://oauth.yandex.ru/authorize?response_type=token&client_id=ВАШ_CLIENT_ID
-```
-**2.** После входа скопируйте `access_token=...` из адресной строки
-
-**3.** Добавьте в `.streamlit/secrets.toml`:
-```toml
-YADISK_TOKEN = "y0_AgAAAA..."
-```
-                """)
-
-            yd_token = st.text_input(
-                "🔑 OAuth-токен Яндекс Диска",
-                value=tok,
-                type="password",
-                placeholder="y0_AgAAAA...",
-                key="input_yd_token"
-            )
-            if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
-                st.session_state.yadisk_token = yd_token.strip()
-                st.success("✅ Сохранён, проверяю...")
-                st.rerun()
-
-        st.divider()
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📤 Загрузить бэкап сейчас", use_container_width=True, type="primary"):
-                with st.spinner("Загружаю..."):
-                    date_str = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-                    if yadisk_upload_backup(tok, shift_date=date_str):
-                        st.success(f"✅ Загружено: backup_{date_str}.db")
-        with col2:
-            if st.button("📥 Восстановить последний", use_container_width=True):
-                with st.spinner("Скачиваю..."):
-                    try:
-                        if yadisk_download_backup(tok):
-                            st.success("✅ База восстановлена!")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ {e}")
-
-        # Список бэкапов
-        st.divider()
-        st.markdown("**📋 Бэкапы на Яндекс Диске:**")
-        if tok:
-            with st.spinner("Загружаю список..."):
-                backups = yadisk_list_backups(tok)
-            if backups:
-                for b in backups:
-                    c1, c2 = st.columns([4, 1])
-                    c1.markdown(f"📄 **{b['name']}**  \n📅 {b['modified']} · {b['size_kb']} KB")
-                    if c2.button("📥", key=f"yd_dl_{b['name']}", use_container_width=True,
-                                 help="Восстановить из этого бэкапа"):
-                        with st.spinner("Восстанавливаю..."):
-                            try:
-                                if yadisk_download_backup(tok, remote_path=b["path"]):
-                                    st.success(f"✅ Восстановлено из {b['name']}!")
-                                    st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ {e}")
-            else:
-                st.info("Бэкапов нет. Они появятся после закрытия первой смены.")
-        else:
-            st.warning("⚠️ Введите токен чтобы увидеть список бэкапов")
-
-    # ===== TAB 3: БЕЗНАЛ =====
-    with tab3:
         st.markdown("### 💳 Безнал")
-
-        cur = get_accumulated_beznal()
-        payments = get_beznal_payments()
+        cur = get_accumulated_beznal(); payments = get_beznal_payments()
         total_paid = sum(p["amount"] for p in payments)
-
-        # Текущий остаток крупно
-        st.metric("💳 Остаток безнала", f"{cur:.0f} ₽",
-                  delta=f"Выплачено всего: {total_paid:.0f} ₽")
-
+        st.metric("💳 Остаток", f"{cur:.0f} ₽", delta=f"Выплачено всего: {total_paid:.0f} ₽")
         st.divider()
-
-        # ===== ФОРМА ВЫПЛАТЫ =====
         st.markdown("#### 💸 Внести выплату")
         c1, c2 = st.columns([2, 1])
-        with c1:
-            pay_amount = st.number_input(
-                "Сумма выплаты (₽)", min_value=0.0, step=100.0,
-                value=float(max(0, cur)), key="pay_amount"
-            )
-        with c2:
-            pay_date = st.date_input(
-                "Дата", value=date.today(), key="pay_date"
-            )
-        pay_note = st.text_input(
-            "Комментарий (необязательно)",
-            placeholder="например: выплата за неделю",
-            key="pay_note"
-        )
-
-        if pay_amount > cur:
-            st.warning(f"⚠️ Сумма выплаты ({pay_amount:.0f} ₽) больше остатка ({cur:.0f} ₽)")
-
-        if st.button("💸 Зафиксировать выплату", use_container_width=True,
-                     type="primary", key="btn_pay_beznal"):
-            if pay_amount <= 0:
-                st.error("❌ Введите сумму больше 0")
+        with c1: pay_amount = st.number_input("Сумма выплаты (₽)", min_value=0.0, step=100.0, value=float(max(0, cur)), key="pay_amount")
+        with c2: pay_date = st.date_input("Дата", value=date.today(), key="pay_date")
+        pay_note = st.text_input("Комментарий", placeholder="за неделю", key="pay_note")
+        if pay_amount > cur: st.warning(f"⚠️ Сумма ({pay_amount:.0f}₽) > остатка ({cur:.0f}₽)")
+        if st.button("💸 Зафиксировать выплату", use_container_width=True, type="primary", key="btn_pay"):
+            if pay_amount <= 0: st.error("❌ Введите сумму > 0")
             else:
                 try:
-                    add_beznal_payment(
-                        pay_amount,
-                        pay_date.strftime("%Y-%m-%d"),
-                        pay_note.strip()
-                    )
-                    st.success(f"✅ Выплата {pay_amount:.0f} ₽ зафиксирована! "
-                               f"Остаток: {cur - pay_amount:.0f} ₽")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Ошибка: {e}")
-
+                    add_beznal_payment(pay_amount, pay_date.strftime("%Y-%m-%d"), pay_note.strip())
+                    st.success(f"✅ {pay_amount:.0f} ₽ выплачено. Остаток: {cur - pay_amount:.0f} ₽"); st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
         st.divider()
-
-        # ===== ИСТОРИЯ ВЫПЛАТ =====
         st.markdown("#### 📋 История выплат")
-        if not payments:
-            st.info("Выплат пока нет")
+        if not payments: st.info("Выплат нет")
         else:
-            # Итог
-            st.caption(f"Всего выплат: **{len(payments)}** на сумму **{total_paid:.0f} ₽**")
-
+            st.caption(f"Выплат: {len(payments)} · Итого: {total_paid:.0f} ₽")
             for p in payments:
-                c1, c2, c3 = st.columns([2, 2, 1])
+                c1, c2, c3 = st.columns([2, 3, 1])
                 c1.markdown(f"**{p['amount']:.0f} ₽**")
-                note_str = f" · {p['note']}" if p['note'] else ""
-                c2.markdown(f"📅 {p['date']}{note_str}")
+                c2.markdown(f"📅 {p['date']}" + (f" · {p['note']}" if p['note'] else ""))
                 if c3.button("🗑️", key=f"del_pay_{p['id']}", use_container_width=True):
-                    try:
-                        delete_beznal_payment(p["id"])
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ {e}")
+                    try: delete_beznal_payment(p["id"]); st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
+        st.divider()
+        with st.expander("⚙️ Ручная корректировка остатка"):
+            nv = st.number_input("Установить остаток (₽)", value=float(cur), key="new_beznal")
+            if st.button("💾 Установить", use_container_width=True):
+                set_accumulated_beznal(nv); st.success(f"✅ {nv:.0f} ₽"); st.rerun()
+
+    # ===== TAB 3: ПРОФИЛЬ =====
+    with tab3:
+        st.markdown("### 👤 Профиль водителя")
+        profile = get_user_profile()
+        photo_b64 = profile.get("photo", "")
+
+        # Предпросмотр
+        if photo_b64:
+            st.markdown(f'<img src="data:image/jpeg;base64,{photo_b64}" '
+                        f'style="width:90px;height:90px;border-radius:50%;object-fit:cover;">',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="width:90px;height:90px;border-radius:50%;background:#e2e8f0;'
+                        'display:flex;align-items:center;justify-content:center;font-size:2.5rem;">👤</div>',
+                        unsafe_allow_html=True)
+
+        # Загрузка фото
+        uploaded_photo = st.file_uploader("📸 Загрузить фото", type=["jpg","jpeg","png"], key="photo_upload")
+        new_photo_b64 = ""
+        if uploaded_photo:
+            raw = uploaded_photo.read()
+            new_photo_b64 = base64.b64encode(raw).decode("utf-8")
+            st.markdown(f'<img src="data:image/jpeg;base64,{new_photo_b64}" '
+                        f'style="width:90px;height:90px;border-radius:50%;object-fit:cover;">',
+                        unsafe_allow_html=True)
+            st.caption("👆 Предпросмотр нового фото")
+
+        if photo_b64:
+            if st.button("🗑️ Удалить фото", use_container_width=True):
+                delete_user_photo(); st.rerun()
 
         st.divider()
-        # Ручная корректировка остатка
-        with st.expander("⚙️ Ручная корректировка остатка", expanded=False):
-            new_val = st.number_input("Установить остаток вручную (₽)",
-                                      value=float(cur), key="new_beznal")
-            if st.button("💾 Установить", use_container_width=True):
-                set_accumulated_beznal(new_val)
-                st.success(f"✅ Установлено: {new_val:.0f} ₽")
-                st.rerun()
+        p_name = st.text_input("👤 Имя водителя", value=profile.get("name", ""), placeholder="Алексей")
+        p_number = st.text_input("🔢 Позывной водителя", value=profile.get("number", ""), placeholder="88")
+        p_font = st.slider("🔡 Размер имени", min_value=18, max_value=56,
+                           value=profile.get("font_size", 28), step=2)
+        # Предпросмотр как на главной
+        preview_name = p_name or "Алексей"
+        preview_number = p_number or ""
+        callsign_preview = (
+            f"<span style='font-size:0.8em;font-weight:500;color:#64748b;"
+            f"background:#f1f5f9;border-radius:6px;padding:2px 8px;margin-left:10px;'>"
+            f"позывной</span>"
+            f"<span style='font-size:{p_font}px;font-weight:700;margin-left:6px;'>{preview_number}</span>"
+        ) if preview_number else ""
+        number_preview = f"<div style='color:#64748b;font-size:0.82rem;margin-top:3px;'>№ {preview_number}</div>" if preview_number else ""
+        st.markdown(
+            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;'>🚕 Водитель</div>"
+            f"<div style='display:flex;align-items:center;flex-wrap:wrap;'>"
+            f"<span style='font-size:{p_font}px;font-weight:700;'>{preview_name}</span>"
+            f"{callsign_preview}</div>{number_preview}",
+            unsafe_allow_html=True)
 
-    # ===== TAB 4: СБРОС =====
+        if st.button("💾 Сохранить профиль", use_container_width=True, type="primary"):
+            save_to_use = new_photo_b64 if new_photo_b64 else photo_b64
+            save_user_profile(p_name.strip(), p_number.strip(), save_to_use, p_font)
+            st.success("✅ Профиль сохранён!"); st.rerun()
+
+    # ===== TAB 4: ПОЛЬЗОВАТЕЛИ =====
     with tab4:
+        st.markdown("### 👥 Управление пользователями")
+        users = get_all_users()
+        current_user = st.session_state.get("username", "")
+
+        for u in users:
+            with st.expander(f"👤 {u['username']}" + (" (вы)" if u['username'] == current_user else ""),
+                             expanded=False):
+                st.caption(f"Зарегистрирован: {u.get('created', '—')}")
+                new_pwd = st.text_input("🔑 Новый пароль", type="password",
+                                        key=f"newpwd_{u['username']}", placeholder="Оставьте пустым чтобы не менять")
+                c1, c2 = st.columns(2)
+                if c1.button("💾 Сменить пароль", key=f"chpwd_{u['username']}", use_container_width=True):
+                    if new_pwd:
+                        if change_password(u['username'], new_pwd): st.success("✅ Пароль изменён")
+                        else: st.error("❌ Ошибка")
+                    else: st.warning("⚠️ Введите новый пароль")
+                if u['username'] != current_user:
+                    if c2.button("🗑️ Удалить", key=f"delusr_{u['username']}", use_container_width=True):
+                        delete_user(u['username']); st.success(f"✅ {u['username']} удалён"); st.rerun()
+
+        st.divider()
+        st.markdown("**➕ Добавить пользователя:**")
+        new_u = st.text_input("👤 Логин", key="new_user_login")
+        new_p = st.text_input("🔑 Пароль", type="password", key="new_user_pwd")
+        if st.button("➕ Создать", use_container_width=True):
+            if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
+            else: st.error("❌ Логин занят или ошибка")
+
+    # ===== TAB 5: СБРОС =====
+    with tab5:
         st.markdown("### ⚠️ Опасная зона")
-        st.error("Удаление всех данных — действие необратимо!")
-        confirm_text = st.text_input("Введите **СБРОС** для подтверждения", placeholder="СБРОС")
+        st.error("Удаление всех данных — необратимо!")
+        confirm_text = st.text_input("Введите СБРОС для подтверждения", placeholder="СБРОС")
         if st.button("⚠️ СБРОСИТЬ БАЗУ", use_container_width=True, type="primary"):
             if confirm_text == "СБРОС":
                 try:
                     from pages_imports import reset_db
-                    reset_db()
-                    st.cache_data.clear()
-                    st.success("✅ База сброшена")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ {e}")
-            else:
-                st.error("❌ Введите слово СБРОС")
-
+                    reset_db(); st.cache_data.clear(); st.success("✅ База сброшена"); st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
+            else: st.error("❌ Введите СБРОС")
 
 # ===== MAIN =====
 if __name__ == "__main__":
-    st.set_page_config(
-        page_title="Taxi Shift Manager",
-        page_icon="🚕",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    apply_mobile_css()
-    init_auth_db()
-    ensure_users_dir()
-    init_session()
+    st.set_page_config(page_title="Taxi Shift Manager", page_icon="🚕",
+                       layout="wide", initial_sidebar_state="expanded")
+    apply_css(); init_auth_db(); ensure_users_dir(); init_session()
 
-    # Восстанавливаем сессию с диска
-    saved = load_session_from_disk()
+    saved = load_session()
     if saved and "username" not in st.session_state:
         st.session_state.username = saved
-        if "page" not in st.session_state:
-            st.session_state.page = "main"
+        if "page" not in st.session_state: st.session_state.page = "main"
 
-    # Страница входа
     if "username" not in st.session_state:
-        show_login_page()
-        st.stop()
+        show_login_page(); st.stop()
 
-    # ===== БОКОВАЯ НАВИГАЦИЯ =====
+    # ===== САЙДБАР =====
     with st.sidebar:
-        st.markdown(f"""
-        <div style="text-align:center; padding: 1rem 0;">
-            <div style="font-size:3rem;">🚕</div>
-            <div style="font-size:1.3rem; font-weight:bold;">{st.session_state.username}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        profile = get_user_profile()
+        photo_b64 = profile.get("photo", "")
+        driver_name = profile.get("name") or st.session_state.username
+        driver_number = profile.get("number", "")
 
-        # Безнал и размер БД
+        if photo_b64:
+            st.markdown(
+                f'<div style="text-align:center;padding:1rem 0;">'
+                f'<img src="data:image/jpeg;base64,{photo_b64}" '
+                f'style="width:80px;height:80px;border-radius:50%;object-fit:cover;">'
+                f'<div style="font-size:1.2rem;font-weight:bold;margin-top:8px;">{driver_name}</div>'
+                f'{"<div style=color:#64748b;font-size:.85rem;>№ " + driver_number + "</div>" if driver_number else ""}'
+                f'</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f'<div style="text-align:center;padding:1rem 0;">'
+                f'<div style="font-size:3rem;">👤</div>'
+                f'<div style="font-size:1.2rem;font-weight:bold;">{driver_name}</div>'
+                f'{"<div style=color:#64748b;font-size:.85rem;>№ " + driver_number + "</div>" if driver_number else ""}'
+                f'</div>', unsafe_allow_html=True)
+
         try:
             acc = get_accumulated_beznal()
-            st.metric("💳 Накопленный безнал", f"{acc:.0f} ₽")
+            st.metric("💳 Безнал", f"{acc:.0f} ₽")
             db_path = get_current_db_name()
-            if os.path.exists(db_path):
-                st.caption(f"💾 БД: {os.path.getsize(db_path) / 1024:.1f} KB")
-        except Exception:
-            pass
+            if os.path.exists(db_path): st.caption(f"💾 БД: {os.path.getsize(db_path)/1024:.1f} KB")
+        except: pass
 
         st.divider()
         page = st.session_state.get("page", "main")
-        if st.button("🏠 Главная", use_container_width=True,
-                     type="primary" if page == "main" else "secondary"):
+        if st.button("🏠 Главная", use_container_width=True, type="primary" if page=="main" else "secondary"):
             st.session_state.page = "main"; st.rerun()
-        if st.button("📊 Отчёты", use_container_width=True,
-                     type="primary" if page == "reports" else "secondary"):
+        if st.button("📊 Отчёты", use_container_width=True, type="primary" if page=="reports" else "secondary"):
             st.session_state.page = "reports"; st.rerun()
-        if st.button("🔧 Настройки", use_container_width=True,
-                     type="primary" if page == "admin" else "secondary"):
+        if st.button("🔧 Настройки", use_container_width=True, type="primary" if page=="admin" else "secondary"):
             st.session_state.page = "admin"; st.rerun()
         st.divider()
         if st.button("👋 Выйти", use_container_width=True):
-            clear_session_disk()
-            st.session_state.clear()
-            st.rerun()
+            clear_session(); st.session_state.clear(); st.rerun()
 
-    # Основные страницы
     page = st.session_state.get("page", "main")
-    if page == "main":
-        show_main_page()
-    elif page == "reports":
-        show_reports_page()
-    elif page == "admin":
-        show_admin_page()
+    if page == "main": show_main_page()
+    elif page == "reports": show_reports_page()
+    elif page == "admin": show_admin_page()
