@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Optional
 import os
-from app import get_db_connection, get_current_db_name, RATE_NAL, RATE_CARD, MOSCOW_TZ
+from app import get_db as get_db_connection, get_current_db_name, RATE_NAL, RATE_CARD, MOSCOW_TZ
 
 def ensure_report_indexes():
     conn = get_db_connection()
@@ -168,7 +168,5 @@ def recalc_full_db() -> float:
     return total_beznal
 
 def reset_db():
-    import streamlit as st
     db_path = get_current_db_name()
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    if os.path.exists(db_path): os.remove(db_path)
