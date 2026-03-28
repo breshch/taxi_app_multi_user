@@ -505,7 +505,54 @@ def yadisk_delete_backup(token: str, remote_path: str) -> bool:
     except Exception as e:
         return getattr(e, "code", 0) in (200, 204)
 
-# ===== UI КОМПОНЕНТЫ =====
+# ===== QR-КОД ЧЕКА =====
+def parse_qr_text(text: str) -> dict:
+    """Парсит текст QR-кода российского кассового чека.
+    Формат ФНС: t=20240315T1423&s=450.00&fn=...&i=...&fp=...&n=1
+    Возвращает dict с ключами: amount, date, raw."""
+    result = {"amount": None, "date": None, "raw": text.strip()}
+    if not text:
+        return result
+    try:
+        import urllib.parse as _up
+        # Убираем возможный префикс https://proverkacheka.com/?qr= и подобные
+        qr = text.strip()
+        if "?" in qr:
+            qr = qr.split("?", 1)[1]
+        params = dict(_up.parse_qsl(qr, keep_blank_values=True))
+
+        # Сумма: s=450.00
+        if "s" in params:
+            result["amount"] = float(params["s"].replace(",", "."))
+
+        # Дата: t=20240315T1423 → 2024-03-15
+        if "t" in params:
+            t = params["t"]
+            if len(t) >= 8:
+                result["date"] = f"{t[0:4]}-{t[4:6]}-{t[6:8]}"
+    except Exception:
+        pass
+    return result
+
+
+def decode_qr_image(image_bytes: bytes) -> str:
+    """Декодирует QR-код из байтов изображения. Возвращает текст или ''."""
+    try:
+        from PIL import Image
+        from pyzbar.pyzbar import decode
+        import io
+        img = Image.open(io.BytesIO(image_bytes))
+        decoded = decode(img)
+        if decoded:
+            return decoded[0].data.decode("utf-8")
+    except ImportError:
+        return "__no_pyzbar__"
+    except Exception:
+        pass
+    return ""
+
+
+
 def render_profile_header():
     """Шапка: фото/аватар слева, имя + позывной по центру, безнал справа."""
     profile = get_user_profile()
@@ -530,13 +577,15 @@ def render_profile_header():
     with col_info:
         display_number = driver_number if driver_number else "—"
         st.markdown(
-            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;"
-            f"letter-spacing:.06em;margin-bottom:3px;'>🚕 Водитель</div>"
-            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:8px;'>"
-            f"<span style='font-size:{font_size}px;font-weight:700;line-height:1.2;'>{driver_name}</span>"
-            f"<span style='font-size:0.8em;font-weight:500;color:#64748b;background:#f1f5f9;"
-            f"border-radius:6px;padding:3px 10px;white-space:nowrap;'>позывной "
-            f"<b style='font-size:1.1em;color:#1e293b;'>{display_number}</b></span>"
+            f"<div style='display:flex;gap:32px;align-items:flex-start;'>"
+            f"<div>"
+            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;'>🚕 Водитель</div>"
+            f"<div style='font-size:{font_size}px;font-weight:700;line-height:1.2;'>{driver_name}</div>"
+            f"</div>"
+            f"<div>"
+            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;'>📡 Позывной</div>"
+            f"<div style='font-size:{font_size}px;font-weight:700;line-height:1.2;'>{display_number}</div>"
+            f"</div>"
             f"</div>",
             unsafe_allow_html=True)
     with col_beznal:
@@ -615,6 +664,9 @@ def show_main_page():
                     else:
                         final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
                     add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
+                    # Обнуляем поля
+                    st.session_state["order_amount"] = ""
+                    st.session_state["order_tips"] = "0"
                     st.rerun()
             except (ValueError, AttributeError):
                 st.error("❌ Введите корректное число (например: 650)")
@@ -672,16 +724,103 @@ def show_main_page():
     # ===== РАСХОДЫ =====
     total_extra = get_total_extra_expenses(shift_id)
     with st.expander(f"💸 Расходы ({total_extra:.0f} ₽)", expanded=False):
+
+        # --- QR-сканер чека ---
+        st.markdown("**📷 Сканировать QR с чека:**")
+        qr_tab1, qr_tab2 = st.tabs(["📷 Фото QR", "📋 Вставить текст QR"])
+
+        qr_amount = st.session_state.get("qr_detected_amount", None)
+        qr_date_str = st.session_state.get("qr_detected_date", "")
+
+        with qr_tab1:
+            uploaded_qr = st.file_uploader(
+                "Сфотографируйте QR-код на чеке и загрузите",
+                type=["jpg", "jpeg", "png"],
+                key="qr_upload",
+                help="Наведите камеру на QR-код чека и загрузите фото"
+            )
+            if uploaded_qr:
+                img_bytes = uploaded_qr.read()
+                qr_text = decode_qr_image(img_bytes)
+                if qr_text == "__no_pyzbar__":
+                    st.warning("⚠️ Библиотека pyzbar не установлена. Используйте вкладку 'Вставить текст QR'.")
+                elif qr_text:
+                    parsed = parse_qr_text(qr_text)
+                    if parsed["amount"]:
+                        st.session_state["qr_detected_amount"] = parsed["amount"]
+                        st.session_state["qr_detected_date"] = parsed.get("date", "")
+                        st.success(f"✅ QR распознан! Сумма: **{parsed['amount']:.2f} ₽**"
+                                   + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
+                        qr_amount = parsed["amount"]
+                        qr_date_str = parsed.get("date", "")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ QR распознан, но сумма не найдена. Попробуйте вставить текст вручную.")
+                        st.code(qr_text, language=None)
+                else:
+                    st.error("❌ QR-код не распознан. Попробуйте сделать чёткое фото при хорошем освещении.")
+
+        with qr_tab2:
+            st.caption("Откройте камеру телефона, наведите на QR чека — телефон сам прочитает текст. Скопируйте и вставьте сюда.")
+            qr_raw = st.text_area(
+                "Текст из QR-кода",
+                placeholder="t=20240315T1423&s=450.00&fn=...",
+                height=80,
+                key="qr_raw_text"
+            )
+            if st.button("🔍 Распознать", use_container_width=True, key="btn_parse_qr"):
+                if qr_raw.strip():
+                    parsed = parse_qr_text(qr_raw)
+                    if parsed["amount"]:
+                        st.session_state["qr_detected_amount"] = parsed["amount"]
+                        st.session_state["qr_detected_date"] = parsed.get("date", "")
+                        st.success(f"✅ Сумма: **{parsed['amount']:.2f} ₽**"
+                                   + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
+                        qr_amount = parsed["amount"]
+                        st.rerun()
+                    else:
+                        st.error("❌ Не удалось извлечь сумму. Проверьте текст QR.")
+                else:
+                    st.warning("⚠️ Вставьте текст из QR-кода")
+
+        st.divider()
+
+        # --- Форма добавления расхода ---
+        st.markdown("**➕ Добавить расход:**")
         c1, c2 = st.columns([2, 1])
-        with c1: exp_desc = st.selectbox("📝 Тип", POPULAR_EXPENSES, key="exp_desc")
-        with c2: exp_amt = st.number_input("₽", min_value=0.0, step=50.0, value=100.0, key="exp_amt")
-        if st.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp"):
-            add_extra_expense(shift_id, exp_amt, exp_desc); st.rerun()
-        for exp in get_extra_expenses(shift_id):
-            c1, c2 = st.columns([4, 1])
-            c1.markdown(f"**{exp['description']}** — {exp['amount']:.0f} ₽")
-            if c2.button("🗑️", key=f"del_exp_{exp['id']}", use_container_width=True):
-                delete_extra_expense(exp["id"]); st.rerun()
+        with c1:
+            exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
+        with c2:
+            # Если QR распознан — подставляем сумму
+            default_amt = float(qr_amount) if qr_amount else 100.0
+            exp_amt = st.number_input("💰 Сумма ₽", min_value=0.0, step=50.0,
+                                       value=default_amt, key="exp_amt")
+
+        # Показываем подсказку если сумма из QR
+        if qr_amount:
+            st.info(f"💡 Сумма подставлена из QR-кода чека: **{qr_amount:.2f} ₽**"
+                    + (f" от {qr_date_str}" if qr_date_str else ""))
+            if st.button("✖️ Сбросить QR", key="btn_reset_qr", use_container_width=False):
+                st.session_state.pop("qr_detected_amount", None)
+                st.session_state.pop("qr_detected_date", None)
+                st.rerun()
+
+        if st.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp", type="primary"):
+            add_extra_expense(shift_id, exp_amt, exp_desc)
+            # Сбрасываем QR после добавления
+            st.session_state.pop("qr_detected_amount", None)
+            st.session_state.pop("qr_detected_date", None)
+            st.rerun()
+
+        # Список расходов
+        expenses = get_extra_expenses(shift_id)
+        if expenses:
+            st.divider()
+            for exp in expenses:
+                c1, c2 = st.columns([4, 1])
+                c1.markdown(f"**{exp['description']}** — {exp['amount']:.0f} ₽")
+                if c2.button("🗑️", key=f"del_exp_{exp['id']}", use_container_width=True):
+                    delete_extra_expense(exp["id"]); st.rerun()
 
     # ===== ИТОГ =====
     st.divider()
