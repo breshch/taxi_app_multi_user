@@ -727,41 +727,52 @@ def show_main_page():
 
         # --- QR-сканер чека ---
         st.markdown("**📷 Сканировать QR с чека:**")
-        qr_tab1, qr_tab2 = st.tabs(["📷 Фото QR", "📋 Вставить текст QR"])
+        qr_tab1, qr_tab2, qr_tab3 = st.tabs(["📸 Камера", "🖼️ Загрузить фото", "📋 Текст из QR"])
 
         qr_amount = st.session_state.get("qr_detected_amount", None)
         qr_date_str = st.session_state.get("qr_detected_date", "")
 
-        with qr_tab1:
-            uploaded_qr = st.file_uploader(
-                "Сфотографируйте QR-код на чеке и загрузите",
-                type=["jpg", "jpeg", "png"],
-                key="qr_upload",
-                help="Наведите камеру на QR-код чека и загрузите фото"
-            )
-            if uploaded_qr:
-                img_bytes = uploaded_qr.read()
-                qr_text = decode_qr_image(img_bytes)
-                if qr_text == "__no_pyzbar__":
-                    st.warning("⚠️ Библиотека pyzbar не установлена. Используйте вкладку 'Вставить текст QR'.")
-                elif qr_text:
-                    parsed = parse_qr_text(qr_text)
-                    if parsed["amount"]:
-                        st.session_state["qr_detected_amount"] = parsed["amount"]
-                        st.session_state["qr_detected_date"] = parsed.get("date", "")
-                        st.success(f"✅ QR распознан! Сумма: **{parsed['amount']:.2f} ₽**"
-                                   + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
-                        qr_amount = parsed["amount"]
-                        qr_date_str = parsed.get("date", "")
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ QR распознан, но сумма не найдена. Попробуйте вставить текст вручную.")
-                        st.code(qr_text, language=None)
+        def _process_qr_bytes(img_bytes):
+            """Декодирует QR и сохраняет результат в session_state."""
+            qr_text = decode_qr_image(img_bytes)
+            if qr_text == "__no_pyzbar__":
+                st.warning("⚠️ Библиотека pyzbar не установлена на сервере. Используйте вкладку 'Текст из QR'.")
+                return False
+            if qr_text:
+                parsed = parse_qr_text(qr_text)
+                if parsed["amount"]:
+                    st.session_state["qr_detected_amount"] = parsed["amount"]
+                    st.session_state["qr_detected_date"] = parsed.get("date", "")
+                    st.success(f"✅ Распознано! Сумма: **{parsed['amount']:.2f} ₽**"
+                               + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
+                    return True
                 else:
-                    st.error("❌ QR-код не распознан. Попробуйте сделать чёткое фото при хорошем освещении.")
+                    st.warning("⚠️ QR прочитан, но сумма не найдена.")
+                    st.code(qr_text, language=None)
+            else:
+                st.error("❌ QR не распознан. Держите чек ровно, при хорошем освещении.")
+            return False
+
+        with qr_tab1:
+            st.caption("Нажмите кнопку — откроется камера телефона прямо в браузере")
+            camera_img = st.camera_input("📸 Сфотографировать QR", key="qr_camera")
+            if camera_img:
+                if _process_qr_bytes(camera_img.getvalue()):
+                    st.rerun()
 
         with qr_tab2:
-            st.caption("Откройте камеру телефона, наведите на QR чека — телефон сам прочитает текст. Скопируйте и вставьте сюда.")
+            st.caption("Если камера не работает — сфотографируйте отдельно и загрузите файл")
+            uploaded_qr = st.file_uploader(
+                "Выбрать фото QR-кода",
+                type=["jpg", "jpeg", "png"],
+                key="qr_upload"
+            )
+            if uploaded_qr:
+                if _process_qr_bytes(uploaded_qr.read()):
+                    st.rerun()
+
+        with qr_tab3:
+            st.caption("Откройте камеру телефона → наведите на QR → скопируйте распознанный текст → вставьте сюда")
             qr_raw = st.text_area(
                 "Текст из QR-кода",
                 placeholder="t=20240315T1423&s=450.00&fn=...",
@@ -776,12 +787,11 @@ def show_main_page():
                         st.session_state["qr_detected_date"] = parsed.get("date", "")
                         st.success(f"✅ Сумма: **{parsed['amount']:.2f} ₽**"
                                    + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
-                        qr_amount = parsed["amount"]
                         st.rerun()
                     else:
-                        st.error("❌ Не удалось извлечь сумму. Проверьте текст QR.")
+                        st.error("❌ Не удалось извлечь сумму.")
                 else:
-                    st.warning("⚠️ Вставьте текст из QR-кода")
+                    st.warning("⚠️ Вставьте текст из QR")
 
         st.divider()
 
