@@ -805,33 +805,31 @@ def show_main_page():
         # Тип расхода — крупно, на всю ширину
         exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
 
-        # Сумма — подставляем из QR через session_state ключ
-        amt_key = "exp_amt_qr" if qr_amount else "exp_amt_manual"
-        # Синхронизируем ключ с QR суммой
-        if qr_amount and amt_key not in st.session_state:
-            st.session_state[amt_key] = float(qr_amount)
+        # Сумма — инициализируем ключ один раз
+        if qr_amount:
+            st.session_state["exp_amt_field"] = float(qr_amount)
+        elif "exp_amt_field" not in st.session_state:
+            st.session_state["exp_amt_field"] = 100.0
 
         exp_amt = st.number_input(
             "💰 Сумма (₽)",
             min_value=0.0,
             step=10.0,
-            value=float(qr_amount) if qr_amount else 100.0,
-            key=amt_key
+            key="exp_amt_field"
         )
 
         c1, c2 = st.columns(2)
         if c1.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp", type="primary"):
             add_extra_expense(shift_id, exp_amt, exp_desc)
-            # Сбрасываем QR и ключи после добавления
             st.session_state.pop("qr_detected_amount", None)
             st.session_state.pop("qr_detected_date", None)
-            st.session_state.pop("exp_amt_qr", None)
+            st.session_state["exp_amt_field"] = 100.0
             st.rerun()
         if qr_amount:
             if c2.button("✖️ Сбросить QR", use_container_width=True, key="btn_reset_qr"):
                 st.session_state.pop("qr_detected_amount", None)
                 st.session_state.pop("qr_detected_date", None)
-                st.session_state.pop("exp_amt_qr", None)
+                st.session_state["exp_amt_field"] = 100.0
                 st.rerun()
 
         # Список расходов
