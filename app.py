@@ -725,111 +725,92 @@ def show_main_page():
     total_extra = get_total_extra_expenses(shift_id)
     with st.expander(f"💸 Расходы ({total_extra:.0f} ₽)", expanded=False):
 
-        # --- QR-сканер чека ---
+        # --- QR-сканер ---
         st.markdown("**📷 Сканировать QR с чека:**")
         qr_tab1, qr_tab2, qr_tab3 = st.tabs(["📸 Камера", "🖼️ Загрузить фото", "📋 Текст из QR"])
 
-        def _process_qr_bytes(img_bytes):
-            """Декодирует QR и сохраняет результат в session_state."""
+        def _save_qr_result(img_bytes):
             qr_text = decode_qr_image(img_bytes)
             if qr_text == "__no_pyzbar__":
-                st.warning("⚠️ Библиотека pyzbar не установлена на сервере. Используйте вкладку 'Текст из QR'.")
-                return False
+                st.warning("⚠️ pyzbar не установлен. Используйте вкладку 'Текст из QR'.")
+                return
             if qr_text:
                 parsed = parse_qr_text(qr_text)
                 if parsed["amount"]:
-                    st.session_state["qr_detected_amount"] = parsed["amount"]
-                    st.session_state["qr_detected_date"] = parsed.get("date", "")
-                    st.success(f"✅ Распознано! Сумма: **{parsed['amount']:.2f} ₽**"
-                               + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
-                    return True
+                    # Записываем в session_state и сбрасываем поле суммы
+                    st.session_state["qr_amount"] = parsed["amount"]
+                    st.session_state["qr_date"] = parsed.get("date", "")
+                    # Удаляем ключ поля чтобы оно получило новое значение при следующем рендере
+                    st.session_state.pop("exp_amt", None)
+                    st.rerun()
                 else:
-                    st.warning("⚠️ QR прочитан, но сумма не найдена.")
-                    st.code(qr_text, language=None)
+                    st.warning("⚠️ QR прочитан, сумма не найдена")
+                    st.code(qr_text)
             else:
-                st.error("❌ QR не распознан. Держите чек ровно, при хорошем освещении.")
-            return False
+                st.error("❌ QR не распознан — держите чек ровно при хорошем освещении")
 
         with qr_tab1:
-            st.caption("Нажмите кнопку — откроется камера телефона прямо в браузере")
-            camera_img = st.camera_input("📸 Сфотографировать QR", key="qr_camera")
-            if camera_img:
-                if _process_qr_bytes(camera_img.getvalue()):
-                    st.rerun()
+            st.caption("Откроется камера — сфотографируйте QR на чеке")
+            cam = st.camera_input("📸 Сфотографировать QR", key="qr_camera")
+            if cam:
+                _save_qr_result(cam.getvalue())
 
         with qr_tab2:
-            st.caption("Если камера не работает — сфотографируйте отдельно и загрузите файл")
-            uploaded_qr = st.file_uploader(
-                "Выбрать фото QR-кода",
-                type=["jpg", "jpeg", "png"],
-                key="qr_upload"
-            )
-            if uploaded_qr:
-                if _process_qr_bytes(uploaded_qr.read()):
-                    st.rerun()
+            st.caption("Загрузите уже готовое фото QR")
+            upl = st.file_uploader("Фото QR", type=["jpg","jpeg","png"], key="qr_upload")
+            if upl:
+                _save_qr_result(upl.read())
 
         with qr_tab3:
-            st.caption("Откройте камеру телефона → наведите на QR → скопируйте распознанный текст → вставьте сюда")
-            qr_raw = st.text_area(
-                "Текст из QR-кода",
-                placeholder="t=20240315T1423&s=450.00&fn=...",
-                height=80,
-                key="qr_raw_text"
-            )
-            if st.button("🔍 Распознать", use_container_width=True, key="btn_parse_qr"):
+            st.caption("Наведите камеру телефона на QR → скопируйте текст → вставьте сюда")
+            qr_raw = st.text_area("Текст из QR", placeholder="t=20240315T1423&s=450.00&fn=...",
+                                  height=70, key="qr_raw_text")
+            if st.button("🔍 Распознать текст", use_container_width=True, key="btn_parse_qr"):
                 if qr_raw.strip():
                     parsed = parse_qr_text(qr_raw)
                     if parsed["amount"]:
-                        st.session_state["qr_detected_amount"] = parsed["amount"]
-                        st.session_state["qr_detected_date"] = parsed.get("date", "")
-                        st.success(f"✅ Сумма: **{parsed['amount']:.2f} ₽**"
-                                   + (f" · Дата: {parsed['date']}" if parsed.get("date") else ""))
+                        st.session_state["qr_amount"] = parsed["amount"]
+                        st.session_state["qr_date"] = parsed.get("date", "")
+                        st.session_state.pop("exp_amt", None)
                         st.rerun()
                     else:
-                        st.error("❌ Не удалось извлечь сумму.")
+                        st.error("❌ Сумма не найдена в тексте QR")
                 else:
                     st.warning("⚠️ Вставьте текст из QR")
 
         st.divider()
 
-        # --- Форма добавления расхода ---
-        qr_amount = st.session_state.get("qr_detected_amount", None)
-        qr_date_str = st.session_state.get("qr_detected_date", "")
+        # --- Форма расхода ---
+        qr_amount = st.session_state.get("qr_amount")
+        qr_date = st.session_state.get("qr_date", "")
 
         if qr_amount:
-            st.success(f"✅ QR распознан — сумма **{qr_amount:.2f} ₽**"
-                       + (f" от {qr_date_str}" if qr_date_str else ""))
+            st.info(f"📋 Из QR: **{qr_amount:.2f} ₽**" + (f" · {qr_date}" if qr_date else ""))
 
-        st.markdown("**➕ Добавить расход:**")
-
-        # Тип расхода — крупно, на всю ширину
         exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
 
-        # Сумма — инициализируем ключ один раз
-        if qr_amount:
-            st.session_state["exp_amt_field"] = float(qr_amount)
-        elif "exp_amt_field" not in st.session_state:
-            st.session_state["exp_amt_field"] = 100.0
-
-        exp_amt = st.number_input(
-            "💰 Сумма (₽)",
-            min_value=0.0,
-            step=10.0,
-            key="exp_amt_field"
-        )
+        # Значение по умолчанию — из QR если есть, иначе 100
+        default_val = float(qr_amount) if qr_amount else 100.0
+        exp_amt = st.number_input("💰 Сумма (₽)", min_value=0.0, step=10.0,
+                                   value=default_val, key="exp_amt")
 
         c1, c2 = st.columns(2)
-        if c1.button("➕ Добавить расход", use_container_width=True, key="btn_add_exp", type="primary"):
-            add_extra_expense(shift_id, exp_amt, exp_desc)
-            st.session_state.pop("qr_detected_amount", None)
-            st.session_state.pop("qr_detected_date", None)
-            st.session_state["exp_amt_field"] = 100.0
-            st.rerun()
+        if c1.button("➕ Добавить расход", use_container_width=True,
+                     key="btn_add_exp", type="primary"):
+            if exp_amt > 0:
+                add_extra_expense(shift_id, exp_amt, exp_desc)
+                st.session_state.pop("qr_amount", None)
+                st.session_state.pop("qr_date", None)
+                st.session_state.pop("exp_amt", None)
+                st.rerun()
+            else:
+                st.error("❌ Введите сумму больше 0")
+
         if qr_amount:
             if c2.button("✖️ Сбросить QR", use_container_width=True, key="btn_reset_qr"):
-                st.session_state.pop("qr_detected_amount", None)
-                st.session_state.pop("qr_detected_date", None)
-                st.session_state["exp_amt_field"] = 100.0
+                st.session_state.pop("qr_amount", None)
+                st.session_state.pop("qr_date", None)
+                st.session_state.pop("exp_amt", None)
                 st.rerun()
 
         # Список расходов
