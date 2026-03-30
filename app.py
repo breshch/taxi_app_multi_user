@@ -16,7 +16,7 @@ from passlib.hash import bcrypt
 AUTH_DB = "users.db"
 USERS_DIR = "users"
 SESSION_FILE = "session.json"
-SESSION_TIMEOUT = 30 * 24 * 60 * 60
+SESSION_TIMEOUT = 24 * 60 * 60  # 24 часа (на время смены)
 RATE_NAL = 0.78
 RATE_CARD = 0.75
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -27,6 +27,13 @@ POPULAR_EXPENSES = [
     "🔧 Мелкий ремонт", "🅿️ Парковка", "💰 Штраф", "🧴 Очиститель",
     "🔋 Зарядка", "🧰 Инструмент", "📱 Связь", "🚕 Аренда", "💊 Аптека"
 ]
+
+def get_master_admin_pwd() -> str:
+    try: return st.secrets.get("MASTER_ADMIN_PASSWORD", "")
+    except: return ""
+
+def is_master_admin() -> bool:
+    return st.session_state.get("master_admin_auth", False)
 
 # ===== CSS =====
 def apply_css():
@@ -632,13 +639,18 @@ def show_main_page():
     st.success(f"✅ Смена: **{date_str}**")
 
     # ===== ДОБАВИТЬ ЗАКАЗ =====
+    # Сбрасываем поля если установлен флаг
+    if st.session_state.pop("reset_order_fields", False):
+        st.session_state.pop("order_amount", None)
+        st.session_state.pop("order_tips", None)
+
     with st.expander("➕ Добавить заказ", expanded=True):
         col1, col2 = st.columns([3, 2])
         with col1:
             amount_str = st.text_input("💰 Сумма чеком (₽)", placeholder="650", key="order_amount")
         with col2:
             order_type = st.selectbox("💳 Тип", ["нал", "карта"], key="order_type")
-        tips_str = st.text_input("💡 Чаевые (₽)", placeholder="0", value="0", key="order_tips")
+        tips_str = st.text_input("💡 Чаевые (₽)", placeholder="0", key="order_tips")
         # Предпросмотр
         try:
             pa = float(amount_str.replace(",", ".")) if amount_str else 0.0
@@ -664,9 +676,8 @@ def show_main_page():
                     else:
                         final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
                     add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
-                    # Обнуляем поля
-                    st.session_state["order_amount"] = ""
-                    st.session_state["order_tips"] = "0"
+                    # Устанавливаем флаг сброса — поля очистятся на следующем рендере
+                    st.session_state["reset_order_fields"] = True
                     st.rerun()
             except (ValueError, AttributeError):
                 st.error("❌ Введите корректное число (например: 650)")
@@ -787,9 +798,12 @@ def show_main_page():
         if qr_amount:
             st.info(f"📋 Из QR: **{qr_amount:.2f} ₽**" + (f" · {qr_date}" if qr_date else ""))
 
+        # Если QR только что распознан — удаляем старый ключ чтобы value= сработал
+        if st.session_state.get("qr_amount") and "exp_amt" in st.session_state:
+            del st.session_state["exp_amt"]
+
         exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
 
-        # Значение по умолчанию — из QR если есть, иначе 100
         default_val = float(qr_amount) if qr_amount else 100.0
         exp_amt = st.number_input("💰 Сумма (₽)", min_value=0.0, step=10.0,
                                    value=default_val, key="exp_amt")
@@ -908,29 +922,31 @@ def show_reports_page():
 # ===== UI: НАСТРОЙКИ =====
 def show_admin_page():
     st.markdown("## 🔧 Настройки")
-    admin_pwd = "changeme"
-    try: admin_pwd = st.secrets.get("ADMIN_PASSWORD", "changeme")
-    except: pass
-    if not st.session_state.get("admin_auth"):
-        pwd = st.text_input("🔑 Пароль", type="password")
-        if st.button("🔐 Войти", use_container_width=True, type="primary"):
-            if pwd == admin_pwd: st.session_state.admin_auth = True; st.rerun()
-            else: st.error("❌ Неверный пароль")
-        return
+    current_user = st.session_state.get("username", "")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "💾 Бэкап", "💳 Безнал", "👤 Профиль", "👥 Пользователи", "⚠️ Сброс"
-    ])
+    # Каждый пользователь — администратор своего аккаунта, пароль не нужен
+    # Мастер-админ — отдельная вкладка с паролем из secrets
 
-    # ===== TAB 1: БЭКАП (локальный + Яндекс Диск) =====
+    master_pwd = get_master_admin_pwd()
+
+    # Определяем набор вкладок
+    if is_master_admin():
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "💾 Бэкап", "💳 Безнал", "👤 Профиль", "⚠️ Сброс", "👑 Мастер-админ"
+        ])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "💾 Бэкап", "💳 Безнал", "👤 Профиль", "⚠️ Сброс"
+        ])
+
+    # ===== TAB 1: БЭКАП =====
     with tab1:
         tok = get_yadisk_token()
         token_ok = yadisk_check_token(tok)
 
-        # --- Яндекс Диск ---
         st.markdown("#### ☁️ Яндекс Диск")
         if token_ok:
-            st.success(f"✅ Подключён · `jet/{st.session_state.get('username')}/backup_<дата>.db`")
+            st.success(f"✅ Подключён · `jet/{current_user}/backup_<дата>.db`")
             with st.expander("🔑 Изменить токен", expanded=False):
                 new_tok = st.text_input("OAuth-токен", value=tok, type="password", key="input_yd_token")
                 if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
@@ -966,7 +982,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
                         if yadisk_download_backup(tok): st.success("✅ Восстановлено!"); st.rerun()
                     except Exception as e: st.error(f"❌ {e}")
 
-        # Список бэкапов на Яндекс Диске
         st.divider()
         st.markdown("**📋 Бэкапы на Яндекс Диске:**")
         if tok:
@@ -982,7 +997,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                                 if yadisk_download_backup(tok, remote_path=b["path"]):
                                     st.success(f"✅ {b['name']}"); st.rerun()
                             except Exception as e: st.error(f"❌ {e}")
-                    if c3.button("🗑️", key=f"yd_del_{b['name']}", use_container_width=True, help="Удалить с Яндекс Диска"):
+                    if c3.button("🗑️", key=f"yd_del_{b['name']}", use_container_width=True, help="Удалить"):
                         if yadisk_delete_backup(tok, b["path"]): st.success("✅ Удалён"); st.rerun()
                         else: st.error("❌ Не удалось удалить")
             else:
@@ -990,7 +1005,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
         else:
             st.warning("⚠️ Введите токен")
 
-        # --- Локальные бэкапы ---
         st.divider()
         st.markdown("#### 📦 Локальные бэкапы")
         if st.button("📦 Создать локальный бэкап", use_container_width=True):
@@ -1068,7 +1082,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
         profile = get_user_profile()
         photo_b64 = profile.get("photo", "")
 
-        # Предпросмотр
         if photo_b64:
             st.markdown(f'<img src="data:image/jpeg;base64,{photo_b64}" '
                         f'style="width:90px;height:90px;border-radius:50%;object-fit:cover;">',
@@ -1078,7 +1091,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
                         'display:flex;align-items:center;justify-content:center;font-size:2.5rem;">👤</div>',
                         unsafe_allow_html=True)
 
-        # Загрузка фото
         uploaded_photo = st.file_uploader("📸 Загрузить фото", type=["jpg","jpeg","png"], key="photo_upload")
         new_photo_b64 = ""
         if uploaded_photo:
@@ -1087,7 +1099,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
             st.markdown(f'<img src="data:image/jpeg;base64,{new_photo_b64}" '
                         f'style="width:90px;height:90px;border-radius:50%;object-fit:cover;">',
                         unsafe_allow_html=True)
-            st.caption("👆 Предпросмотр нового фото")
+            st.caption("👆 Предпросмотр")
 
         if photo_b64:
             if st.button("🗑️ Удалить фото", use_container_width=True):
@@ -1095,63 +1107,46 @@ YADISK_TOKEN = "y0_AgAAAA..."
 
         st.divider()
         p_name = st.text_input("👤 Имя водителя", value=profile.get("name", ""), placeholder="Алексей")
-        p_number = st.text_input("🔢 Позывной водителя", value=profile.get("number", ""), placeholder="88")
+        p_number = st.text_input("📡 Позывной водителя", value=profile.get("number", ""), placeholder="88")
         p_font = st.slider("🔡 Размер имени", min_value=18, max_value=56,
                            value=profile.get("font_size", 28), step=2)
-        # Предпросмотр как на главной
         preview_name = p_name or "Алексей"
-        preview_number = p_number or ""
-        callsign_preview = (
-            f"<span style='font-size:0.8em;font-weight:500;color:#64748b;"
-            f"background:#f1f5f9;border-radius:6px;padding:2px 8px;margin-left:10px;'>"
-            f"позывной</span>"
-            f"<span style='font-size:{p_font}px;font-weight:700;margin-left:6px;'>{preview_number}</span>"
-        ) if preview_number else ""
-        number_preview = f"<div style='color:#64748b;font-size:0.82rem;margin-top:3px;'>№ {preview_number}</div>" if preview_number else ""
+        preview_number = p_number or "88"
         st.markdown(
-            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;'>🚕 Водитель</div>"
-            f"<div style='display:flex;align-items:center;flex-wrap:wrap;'>"
-            f"<span style='font-size:{p_font}px;font-weight:700;'>{preview_name}</span>"
-            f"{callsign_preview}</div>{number_preview}",
-            unsafe_allow_html=True)
+            f"<div style='color:#94a3b8;font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;'>Предпросмотр</div>"
+            f"<div style='display:flex;gap:32px;'>"
+            f"<div><div style='color:#94a3b8;font-size:0.7rem;'>🚕 ВОДИТЕЛЬ</div>"
+            f"<div style='font-size:{p_font}px;font-weight:700;'>{preview_name}</div></div>"
+            f"<div><div style='color:#94a3b8;font-size:0.7rem;'>📡 ПОЗЫВНОЙ</div>"
+            f"<div style='font-size:{p_font}px;font-weight:700;'>{preview_number}</div></div>"
+            f"</div>", unsafe_allow_html=True)
+
+        st.divider()
+        # Смена своего пароля
+        st.markdown("#### 🔑 Сменить пароль")
+        old_pwd = st.text_input("Текущий пароль", type="password", key="old_pwd")
+        new_pwd1 = st.text_input("Новый пароль", type="password", key="new_pwd1")
+        new_pwd2 = st.text_input("Повторите новый пароль", type="password", key="new_pwd2")
+        if st.button("💾 Сменить пароль", use_container_width=True, key="btn_change_pwd"):
+            if not authenticate_user(current_user, old_pwd):
+                st.error("❌ Текущий пароль неверный")
+            elif new_pwd1 != new_pwd2:
+                st.error("❌ Новые пароли не совпадают")
+            elif len(new_pwd1) < 4:
+                st.error("❌ Пароль должен быть минимум 4 символа")
+            else:
+                if change_password(current_user, new_pwd1):
+                    st.success("✅ Пароль изменён!")
+                else:
+                    st.error("❌ Ошибка при смене пароля")
 
         if st.button("💾 Сохранить профиль", use_container_width=True, type="primary"):
             save_to_use = new_photo_b64 if new_photo_b64 else photo_b64
             save_user_profile(p_name.strip(), p_number.strip(), save_to_use, p_font)
             st.success("✅ Профиль сохранён!"); st.rerun()
 
-    # ===== TAB 4: ПОЛЬЗОВАТЕЛИ =====
+    # ===== TAB 4: СБРОС =====
     with tab4:
-        st.markdown("### 👥 Управление пользователями")
-        users = get_all_users()
-        current_user = st.session_state.get("username", "")
-
-        for u in users:
-            with st.expander(f"👤 {u['username']}" + (" (вы)" if u['username'] == current_user else ""),
-                             expanded=False):
-                st.caption(f"Зарегистрирован: {u.get('created', '—')}")
-                new_pwd = st.text_input("🔑 Новый пароль", type="password",
-                                        key=f"newpwd_{u['username']}", placeholder="Оставьте пустым чтобы не менять")
-                c1, c2 = st.columns(2)
-                if c1.button("💾 Сменить пароль", key=f"chpwd_{u['username']}", use_container_width=True):
-                    if new_pwd:
-                        if change_password(u['username'], new_pwd): st.success("✅ Пароль изменён")
-                        else: st.error("❌ Ошибка")
-                    else: st.warning("⚠️ Введите новый пароль")
-                if u['username'] != current_user:
-                    if c2.button("🗑️ Удалить", key=f"delusr_{u['username']}", use_container_width=True):
-                        delete_user(u['username']); st.success(f"✅ {u['username']} удалён"); st.rerun()
-
-        st.divider()
-        st.markdown("**➕ Добавить пользователя:**")
-        new_u = st.text_input("👤 Логин", key="new_user_login")
-        new_p = st.text_input("🔑 Пароль", type="password", key="new_user_pwd")
-        if st.button("➕ Создать", use_container_width=True):
-            if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
-            else: st.error("❌ Логин занят или ошибка")
-
-    # ===== TAB 5: СБРОС =====
-    with tab5:
         st.markdown("### ⚠️ Опасная зона")
         st.error("Удаление всех данных — необратимо!")
         confirm_text = st.text_input("Введите СБРОС для подтверждения", placeholder="СБРОС")
@@ -1162,6 +1157,59 @@ YADISK_TOKEN = "y0_AgAAAA..."
                     reset_db(); st.cache_data.clear(); st.success("✅ База сброшена"); st.rerun()
                 except Exception as e: st.error(f"❌ {e}")
             else: st.error("❌ Введите СБРОС")
+
+    # ===== TAB 5: МАСТЕР-АДМИН (только если авторизован) =====
+    if is_master_admin():
+        with tab5:
+            st.markdown("### 👑 Мастер-администратор")
+            st.info("Управление всеми пользователями системы")
+
+            users = get_all_users()
+            st.markdown(f"**Всего пользователей: {len(users)}**")
+            st.divider()
+
+            for u in users:
+                with st.expander(f"👤 {u['username']}" + (" ← вы" if u['username'] == current_user else ""),
+                                 expanded=False):
+                    st.caption(f"Зарегистрирован: {u.get('created', '—')}")
+                    # Сброс пароля мастером
+                    new_pwd = st.text_input("🔑 Новый пароль", type="password",
+                                            key=f"master_pwd_{u['username']}",
+                                            placeholder="Введите новый пароль")
+                    c1, c2 = st.columns(2)
+                    if c1.button("💾 Сбросить пароль", key=f"master_chpwd_{u['username']}", use_container_width=True, type="primary"):
+                        if new_pwd:
+                            if change_password(u['username'], new_pwd):
+                                st.success(f"✅ Пароль {u['username']} изменён")
+                            else:
+                                st.error("❌ Ошибка")
+                        else:
+                            st.warning("⚠️ Введите новый пароль")
+                    if u['username'] != current_user:
+                        if c2.button("🗑️ Удалить", key=f"master_del_{u['username']}", use_container_width=True):
+                            delete_user(u['username']); st.success(f"✅ {u['username']} удалён"); st.rerun()
+
+            st.divider()
+            st.markdown("**➕ Создать нового пользователя:**")
+            new_u = st.text_input("👤 Логин", key="master_new_login")
+            new_p = st.text_input("🔑 Пароль", type="password", key="master_new_pwd")
+            if st.button("➕ Создать", use_container_width=True):
+                if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
+                else: st.error("❌ Логин занят или ошибка")
+
+    # Кнопка входа в мастер-админ (внизу страницы если ещё не вошёл)
+    if not is_master_admin() and master_pwd:
+        st.divider()
+        with st.expander("👑 Вход для мастер-администратора", expanded=False):
+            master_input = st.text_input("Мастер-пароль", type="password", key="master_pwd_input")
+            if st.button("🔐 Войти как мастер-админ", use_container_width=True):
+                if master_input == master_pwd:
+                    st.session_state.master_admin_auth = True
+                    st.success("✅ Добро пожаловать, мастер-админ!")
+                    st.rerun()
+                else:
+                    st.error("❌ Неверный мастер-пароль")
+
 
 # ===== MAIN =====
 if __name__ == "__main__":
