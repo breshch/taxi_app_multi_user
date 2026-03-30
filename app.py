@@ -761,8 +761,32 @@ def show_main_page():
                 st.error("❌ QR не распознан — держите чек ровно при хорошем освещении")
 
         with qr_tab1:
-            st.caption("Откроется камера — сфотографируйте QR на чеке")
-            cam = st.camera_input("📸 Сфотографировать QR", key="qr_camera")
+            # Переключаем камеру на заднюю через JS после рендера
+            st.markdown("""
+            <script>
+            (function switchToRearCamera() {
+                const trySwitch = setInterval(() => {
+                    const videos = window.parent.document.querySelectorAll('video');
+                    videos.forEach(video => {
+                        if (video.srcObject) {
+                            const tracks = video.srcObject.getVideoTracks();
+                            tracks.forEach(track => {
+                                const settings = track.getSettings();
+                                if (settings.facingMode !== 'environment') {
+                                    track.applyConstraints({facingMode: {exact: 'environment'}})
+                                        .catch(() => track.applyConstraints({facingMode: 'environment'}));
+                                }
+                            });
+                            clearInterval(trySwitch);
+                        }
+                    });
+                }, 500);
+                setTimeout(() => clearInterval(trySwitch), 10000);
+            })();
+            </script>
+            """, unsafe_allow_html=True)
+            st.caption("📷 Используется задняя камера — наведите на QR-код чека")
+            cam = st.camera_input("Сфотографировать QR", key="qr_camera")
             if cam:
                 _save_qr_result(cam.getvalue())
 
@@ -798,15 +822,13 @@ def show_main_page():
         if qr_amount:
             st.info(f"📋 Из QR: **{qr_amount:.2f} ₽**" + (f" · {qr_date}" if qr_date else ""))
 
-        # Если QR только что распознан — удаляем старый ключ чтобы value= сработал
-        if st.session_state.get("qr_amount") and "exp_amt" in st.session_state:
-            del st.session_state["exp_amt"]
-
         exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
 
+        # Используем динамический ключ — при новом QR ключ меняется, виджет пересоздаётся с новым value
+        amt_widget_key = f"exp_amt_{int(qr_amount * 100) if qr_amount else 0}"
         default_val = float(qr_amount) if qr_amount else 100.0
         exp_amt = st.number_input("💰 Сумма (₽)", min_value=0.0, step=10.0,
-                                   value=default_val, key="exp_amt")
+                                   value=default_val, key=amt_widget_key)
 
         c1, c2 = st.columns(2)
         if c1.button("➕ Добавить расход", use_container_width=True,
@@ -815,7 +837,6 @@ def show_main_page():
                 add_extra_expense(shift_id, exp_amt, exp_desc)
                 st.session_state.pop("qr_amount", None)
                 st.session_state.pop("qr_date", None)
-                st.session_state.pop("exp_amt", None)
                 st.rerun()
             else:
                 st.error("❌ Введите сумму больше 0")
