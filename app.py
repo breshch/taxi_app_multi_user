@@ -16,7 +16,7 @@ from passlib.hash import bcrypt
 AUTH_DB = "users.db"
 USERS_DIR = "users"
 SESSION_FILE = "session.json"
-SESSION_TIMEOUT = 24 * 60 * 60  # 24 часа (на время смены)
+SESSION_TIMEOUT = 7 * 24 * 60 * 60  # 7 дней — не выбрасывает при простое
 RATE_NAL = 0.78
 RATE_CARD = 0.75
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -78,6 +78,10 @@ def clear_session():
 
 def init_session():
     if "session_start" not in st.session_state:
+        st.session_state.session_start = datetime.now(MOSCOW_TZ)
+        save_session()
+    else:
+        # Обновляем время при каждом заходе — сессия не истекает пока пользуются
         st.session_state.session_start = datetime.now(MOSCOW_TZ)
         save_session()
     if (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds() > SESSION_TIMEOUT:
@@ -639,10 +643,10 @@ def show_main_page():
     st.success(f"✅ Смена: **{date_str}**")
 
     # ===== ДОБАВИТЬ ЗАКАЗ =====
-    # Сбрасываем поля если установлен флаг
+    # Флаг сброса — очищаем ДО создания виджетов
     if st.session_state.pop("reset_order_fields", False):
-        st.session_state.pop("order_amount", None)
-        st.session_state.pop("order_tips", None)
+        for k in ["order_amount", "order_tips"]:
+            st.session_state.pop(k, None)
 
     with st.expander("➕ Добавить заказ", expanded=True):
         col1, col2 = st.columns([3, 2])
@@ -740,61 +744,50 @@ def show_main_page():
         st.markdown("**📷 Сканировать QR с чека:**")
         qr_tab1, qr_tab2, qr_tab3 = st.tabs(["📸 Камера", "🖼️ Загрузить фото", "📋 Текст из QR"])
 
-        def _save_qr_result(img_bytes):
+        def _save_qr_result(img_bytes) -> bool:
+            """Декодирует QR, сохраняет результат. Возвращает True если нашли сумму."""
             qr_text = decode_qr_image(img_bytes)
             if qr_text == "__no_pyzbar__":
                 st.warning("⚠️ pyzbar не установлен. Используйте вкладку 'Текст из QR'.")
-                return
+                return False
             if qr_text:
                 parsed = parse_qr_text(qr_text)
                 if parsed["amount"]:
-                    # Записываем в session_state и сбрасываем поле суммы
                     st.session_state["qr_amount"] = parsed["amount"]
                     st.session_state["qr_date"] = parsed.get("date", "")
-                    # Удаляем ключ поля чтобы оно получило новое значение при следующем рендере
-                    st.session_state.pop("exp_amt", None)
-                    st.rerun()
+                    return True
                 else:
                     st.warning("⚠️ QR прочитан, сумма не найдена")
                     st.code(qr_text)
             else:
                 st.error("❌ QR не распознан — держите чек ровно при хорошем освещении")
+            return False
 
         with qr_tab1:
-            # Переключаем камеру на заднюю через JS после рендера
-            st.markdown("""
-            <script>
-            (function switchToRearCamera() {
-                const trySwitch = setInterval(() => {
-                    const videos = window.parent.document.querySelectorAll('video');
-                    videos.forEach(video => {
-                        if (video.srcObject) {
-                            const tracks = video.srcObject.getVideoTracks();
-                            tracks.forEach(track => {
-                                const settings = track.getSettings();
-                                if (settings.facingMode !== 'environment') {
-                                    track.applyConstraints({facingMode: {exact: 'environment'}})
-                                        .catch(() => track.applyConstraints({facingMode: 'environment'}));
-                                }
-                            });
-                            clearInterval(trySwitch);
-                        }
-                    });
-                }, 500);
-                setTimeout(() => clearInterval(trySwitch), 10000);
-            })();
-            </script>
-            """, unsafe_allow_html=True)
-            st.caption("📷 Используется задняя камера — наведите на QR-код чека")
+            st.markdown("""<script>
+            setTimeout(function() {
+                var videos = window.parent.document.querySelectorAll('video');
+                videos.forEach(function(v) {
+                    if (v.srcObject) {
+                        v.srcObject.getVideoTracks().forEach(function(t) {
+                            t.applyConstraints({facingMode:'environment'}).catch(function(){});
+                        });
+                    }
+                });
+            }, 1000);
+            </script>""", unsafe_allow_html=True)
+            st.caption("📷 Задняя камера — наведите на QR-код чека")
             cam = st.camera_input("Сфотографировать QR", key="qr_camera")
-            if cam:
-                _save_qr_result(cam.getvalue())
+            if cam and not st.session_state.get("qr_amount"):
+                if _save_qr_result(cam.getvalue()):
+                    st.success(f"✅ Сумма: **{st.session_state['qr_amount']:.2f} ₽**")
 
         with qr_tab2:
-            st.caption("Загрузите уже готовое фото QR")
+            st.caption("Загрузите готовое фото QR")
             upl = st.file_uploader("Фото QR", type=["jpg","jpeg","png"], key="qr_upload")
-            if upl:
-                _save_qr_result(upl.read())
+            if upl and not st.session_state.get("qr_amount"):
+                if _save_qr_result(upl.read()):
+                    st.success(f"✅ Сумма: **{st.session_state['qr_amount']:.2f} ₽**")
 
         with qr_tab3:
             st.caption("Наведите камеру телефона на QR → скопируйте текст → вставьте сюда")
@@ -806,8 +799,8 @@ def show_main_page():
                     if parsed["amount"]:
                         st.session_state["qr_amount"] = parsed["amount"]
                         st.session_state["qr_date"] = parsed.get("date", "")
-                        st.session_state.pop("exp_amt", None)
-                        st.rerun()
+                        st.success(f"✅ Сумма: **{parsed['amount']:.2f} ₽**"
+                                   + (f" · {parsed['date']}" if parsed.get("date") else ""))
                     else:
                         st.error("❌ Сумма не найдена в тексте QR")
                 else:
@@ -923,6 +916,56 @@ def show_reports_page():
             c3.metric("⛽ Топливо", f"{dr['топливо']:.0f} ₽"); c4.metric("📈 Прибыль", f"{dr['прибыль']:.0f} ₽")
             c1,c2,c3 = st.columns(3)
             c1.metric("💵 Нал", f"{dr['нал']:.0f} ₽"); c2.metric("💳 Карта", f"{dr['карта']:.0f} ₽"); c3.metric("💡 Чаевые", f"{dr['чаевые']:.0f} ₽")
+
+            # Таблица всех заказов за выбранный день
+            st.markdown("#### 🧾 Все заказы за день")
+            conn = get_db()
+            c_db = conn.cursor()
+            c_db.execute("""
+                SELECT s.id, o.order_time, o.type, o.amount, o.tips,
+                       o.commission, o.total, o.beznal_added
+                FROM orders o
+                JOIN shifts s ON o.shift_id = s.id
+                WHERE s.date = ? AND s.is_open = 0
+                ORDER BY s.id, o.id
+            """, (selected_day,))
+            rows = c_db.fetchall()
+
+            # Расходы за день
+            c_db.execute("""
+                SELECT e.description, e.amount, e.created_at
+                FROM extra_expenses e
+                JOIN shifts s ON e.shift_id = s.id
+                WHERE s.date = ? AND s.is_open = 0
+                ORDER BY e.id
+            """, (selected_day,))
+            expenses_rows = c_db.fetchall()
+            conn.close()
+
+            if rows:
+                orders_df = pd.DataFrame(rows, columns=[
+                    "Смена №", "Время", "Тип", "Чек ₽", "Чаевые ₽",
+                    "Комиссия ₽", "На руки ₽", "Δ Безнал ₽"
+                ])
+                orders_df["Чек ₽"] = orders_df["Чек ₽"].round(0).astype(int)
+                orders_df["Чаевые ₽"] = orders_df["Чаевые ₽"].round(0).astype(int)
+                orders_df["Комиссия ₽"] = orders_df["Комиссия ₽"].round(0).astype(int)
+                orders_df["На руки ₽"] = orders_df["На руки ₽"].round(0).astype(int)
+                orders_df["Δ Безнал ₽"] = orders_df["Δ Безнал ₽"].round(0).astype(int)
+                st.dataframe(orders_df, use_container_width=True, hide_index=True)
+                st.caption(f"Итого заказов: {len(rows)} · "
+                           f"Нал: {orders_df[orders_df['Тип']=='нал']['На руки ₽'].sum()} ₽ · "
+                           f"Карта: {orders_df[orders_df['Тип']=='карта']['На руки ₽'].sum()} ₽")
+            else:
+                st.info("Нет заказов за этот день")
+
+            if expenses_rows:
+                st.markdown("#### 💸 Расходы за день")
+                exp_df = pd.DataFrame(expenses_rows, columns=["Описание", "Сумма ₽", "Время"])
+                exp_df["Время"] = exp_df["Время"].str[:16]
+                exp_df["Сумма ₽"] = exp_df["Сумма ₽"].round(0).astype(int)
+                st.dataframe(exp_df, use_container_width=True, hide_index=True)
+
             st.divider()
         st.markdown(f"### 📊 {format_month_option(selected_ym)}")
         totals = get_month_totals_cached(selected_ym)
