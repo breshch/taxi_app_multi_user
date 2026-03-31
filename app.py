@@ -680,15 +680,6 @@ def show_main_page():
         with col2:
             order_type = st.selectbox("💳 Тип", ["нал", "карта"], key="order_type")
 
-        # Быстрые кнопки сумм
-        st.caption("⚡ Быстрый ввод:")
-        qb_cols = st.columns(6)
-        quick_amounts = [300, 350, 400, 450, 500, 600]
-        for i, qa in enumerate(quick_amounts):
-            if qb_cols[i].button(f"{qa}", key=f"qa_{qa}", use_container_width=True):
-                st.session_state["order_amount"] = str(qa)
-                st.rerun()
-
         tips_str = st.text_input("💡 Чаевые (₽)", placeholder="0", key="order_tips")
         # Предпросмотр
         try:
