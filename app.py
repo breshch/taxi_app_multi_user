@@ -736,9 +736,31 @@ def show_main_page():
     else:
         total_income = 0.0
 
-    # ===== РАСХОДЫ =====
+    # ===== ЗАКРЫТИЕ СМЕНЫ И РАСХОДЫ — заметные кнопки =====
+    st.divider()
     total_extra = get_total_extra_expenses(shift_id)
-    with st.expander(f"💸 Расходы ({total_extra:.0f} ₽)", expanded=False):
+    col_exp, col_close = st.columns(2)
+
+    # Кнопка расходов — открывает expander
+    with col_exp:
+        st.markdown(f"""
+        <div style="background:#fff7ed;border:2px solid #fb923c;border-radius:12px;
+        padding:10px;text-align:center;margin-bottom:8px;">
+        <div style="font-size:1.4rem;">💸</div>
+        <div style="font-weight:700;color:#ea580c;">Расходы</div>
+        <div style="font-size:0.85rem;color:#9a3412;">{total_extra:.0f} ₽</div>
+        </div>""", unsafe_allow_html=True)
+
+    with col_close:
+        st.markdown(f"""
+        <div style="background:#fef2f2;border:2px solid #f87171;border-radius:12px;
+        padding:10px;text-align:center;margin-bottom:8px;">
+        <div style="font-size:1.4rem;">🔒</div>
+        <div style="font-weight:700;color:#dc2626;">Закрыть смену</div>
+        <div style="font-size:0.85rem;color:#7f1d1d;">Завершить работу</div>
+        </div>""", unsafe_allow_html=True)
+
+    with st.expander("💸 Расходы — добавить / QR-сканер", expanded=False):
 
         # --- QR-сканер ---
         st.markdown("**📷 Сканировать QR с чека:**")
@@ -1226,38 +1248,103 @@ YADISK_TOKEN = "y0_AgAAAA..."
     if is_master_admin():
         with tab5:
             st.markdown("### 👑 Мастер-администратор")
-            st.info("Управление всеми пользователями системы")
 
             users = get_all_users()
-            st.markdown(f"**Всего пользователей: {len(users)}**")
+            st.metric("👥 Всего пользователей", len(users))
             st.divider()
 
-            for u in users:
-                with st.expander(f"👤 {u['username']}" + (" ← вы" if u['username'] == current_user else ""),
-                                 expanded=False):
-                    st.caption(f"Зарегистрирован: {u.get('created', '—')}")
-                    # Сброс пароля мастером
-                    new_pwd = st.text_input("🔑 Новый пароль", type="password",
-                                            key=f"master_pwd_{u['username']}",
-                                            placeholder="Введите новый пароль")
-                    c1, c2 = st.columns(2)
-                    if c1.button("💾 Сбросить пароль", key=f"master_chpwd_{u['username']}", use_container_width=True, type="primary"):
-                        if new_pwd:
-                            if change_password(u['username'], new_pwd):
-                                st.success(f"✅ Пароль {u['username']} изменён")
-                            else:
-                                st.error("❌ Ошибка")
-                        else:
+            # Выбор пользователя
+            usernames = [u["username"] for u in users]
+            selected_u = st.selectbox("👤 Выберите пользователя",
+                                       usernames, key="master_selected_user")
+
+            if selected_u:
+                u_info = next((u for u in users if u["username"] == selected_u), None)
+                st.caption(f"Зарегистрирован: {u_info.get('created', '—')}")
+
+                # Профиль пользователя из его БД
+                orig_user = st.session_state.get("username")
+                try:
+                    # Временно переключаемся на БД выбранного пользователя
+                    st.session_state["username"] = selected_u
+                    u_profile = get_user_profile()
+                    u_beznal = get_accumulated_beznal()
+                    st.session_state["username"] = orig_user
+                except Exception:
+                    st.session_state["username"] = orig_user
+                    u_profile = {"name": "", "number": "", "font_size": 28, "photo": ""}
+                    u_beznal = 0.0
+
+                st.markdown(f"**Имя:** {u_profile.get('name') or '—'} &nbsp; "
+                            f"**Позывной:** {u_profile.get('number') or '—'} &nbsp; "
+                            f"**Безнал:** {u_beznal:.0f} ₽")
+
+                st.divider()
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**✏️ Изменить имя водителя:**")
+                    new_name = st.text_input("Имя водителя", value=u_profile.get("name", ""),
+                                             key=f"master_name_{selected_u}")
+                    new_number = st.text_input("Позывной", value=u_profile.get("number", ""),
+                                               key=f"master_number_{selected_u}")
+                    if st.button("💾 Сохранить имя", use_container_width=True,
+                                 key=f"master_save_name_{selected_u}", type="primary"):
+                        try:
+                            st.session_state["username"] = selected_u
+                            save_user_profile(new_name.strip(), new_number.strip(),
+                                              u_profile.get("photo", ""),
+                                              u_profile.get("font_size", 28))
+                            st.session_state["username"] = orig_user
+                            st.success(f"✅ Имя {selected_u} обновлено")
+                        except Exception as e:
+                            st.session_state["username"] = orig_user
+                            st.error(f"❌ {e}")
+
+                with col2:
+                    st.markdown("**🔑 Сбросить пароль:**")
+                    new_pwd = st.text_input("Новый пароль", type="password",
+                                            key=f"master_pwd_{selected_u}",
+                                            placeholder="Минимум 4 символа")
+                    new_pwd2 = st.text_input("Повторить пароль", type="password",
+                                             key=f"master_pwd2_{selected_u}")
+                    if st.button("🔑 Сменить пароль", use_container_width=True,
+                                 key=f"master_chpwd_{selected_u}", type="primary"):
+                        if not new_pwd:
                             st.warning("⚠️ Введите новый пароль")
-                    if u['username'] != current_user:
-                        if c2.button("🗑️ Удалить", key=f"master_del_{u['username']}", use_container_width=True):
-                            delete_user(u['username']); st.success(f"✅ {u['username']} удалён"); st.rerun()
+                        elif new_pwd != new_pwd2:
+                            st.error("❌ Пароли не совпадают")
+                        elif len(new_pwd) < 4:
+                            st.error("❌ Минимум 4 символа")
+                        elif change_password(selected_u, new_pwd):
+                            st.success(f"✅ Пароль {selected_u} изменён")
+                        else:
+                            st.error("❌ Ошибка")
+
+                if selected_u != current_user:
+                    st.divider()
+                    if not st.session_state.get(f"confirm_del_{selected_u}"):
+                        if st.button(f"🗑️ Удалить пользователя {selected_u}",
+                                     use_container_width=True, key=f"master_del_{selected_u}"):
+                            st.session_state[f"confirm_del_{selected_u}"] = True; st.rerun()
+                    else:
+                        st.error(f"⚠️ Удалить {selected_u}? Это необратимо!")
+                        c1, c2 = st.columns(2)
+                        if c1.button("✅ Да, удалить", use_container_width=True,
+                                     key=f"master_confirm_del_{selected_u}", type="primary"):
+                            delete_user(selected_u)
+                            st.session_state.pop(f"confirm_del_{selected_u}", None)
+                            st.success(f"✅ {selected_u} удалён"); st.rerun()
+                        if c2.button("❌ Отмена", use_container_width=True,
+                                     key=f"master_cancel_del_{selected_u}"):
+                            st.session_state.pop(f"confirm_del_{selected_u}", None); st.rerun()
 
             st.divider()
             st.markdown("**➕ Создать нового пользователя:**")
-            new_u = st.text_input("👤 Логин", key="master_new_login")
-            new_p = st.text_input("🔑 Пароль", type="password", key="master_new_pwd")
-            if st.button("➕ Создать", use_container_width=True):
+            c1, c2 = st.columns(2)
+            with c1: new_u = st.text_input("👤 Логин", key="master_new_login")
+            with c2: new_p = st.text_input("🔑 Пароль", type="password", key="master_new_pwd")
+            if st.button("➕ Создать пользователя", use_container_width=True):
                 if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
                 else: st.error("❌ Логин занят или ошибка")
 
