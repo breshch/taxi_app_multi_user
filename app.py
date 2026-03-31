@@ -640,7 +640,32 @@ def show_main_page():
         return
 
     shift_id, date_str = open_shift_data
+
+    # ===== ПРОВЕРКА ДЛИТЕЛЬНОСТИ СМЕНЫ =====
+    conn_check = get_db()
+    c_check = conn_check.cursor()
+    c_check.execute("SELECT opened_at FROM shifts WHERE id=?", (shift_id,))
+    row_check = c_check.fetchone()
+    conn_check.close()
+    if row_check and row_check[0]:
+        try:
+            opened_at = datetime.strptime(row_check[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=MOSCOW_TZ)
+            hours_open = (datetime.now(MOSCOW_TZ) - opened_at).total_seconds() / 3600
+            if hours_open > 12:
+                st.warning(f"⚠️ Смена открыта **{hours_open:.0f} ч** — не забудьте закрыть смену!")
+            elif hours_open > 10:
+                st.info(f"ℹ️ Смена идёт {hours_open:.0f} ч")
+        except Exception:
+            pass
+
     st.success(f"✅ Смена: **{date_str}**")
+
+    # JS: виброотклик при добавлении заказа
+    st.markdown("""<script>
+    window._vibrate = function() {
+        if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+    };
+    </script>""", unsafe_allow_html=True)
 
     # ===== ДОБАВИТЬ ЗАКАЗ =====
     # Флаг сброса — очищаем ДО создания виджетов
@@ -654,6 +679,16 @@ def show_main_page():
             amount_str = st.text_input("💰 Сумма чеком (₽)", placeholder="650", key="order_amount")
         with col2:
             order_type = st.selectbox("💳 Тип", ["нал", "карта"], key="order_type")
+
+        # Быстрые кнопки сумм
+        st.caption("⚡ Быстрый ввод:")
+        qb_cols = st.columns(6)
+        quick_amounts = [300, 350, 400, 450, 500, 600]
+        for i, qa in enumerate(quick_amounts):
+            if qb_cols[i].button(f"{qa}", key=f"qa_{qa}", use_container_width=True):
+                st.session_state["order_amount"] = str(qa)
+                st.rerun()
+
         tips_str = st.text_input("💡 Чаевые (₽)", placeholder="0", key="order_tips")
         # Предпросмотр
         try:
@@ -680,7 +715,9 @@ def show_main_page():
                     else:
                         final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
                     add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
-                    # Устанавливаем флаг сброса — поля очистятся на следующем рендере
+                    # Вибро при успехе
+                    st.markdown("<script>window._vibrate && window._vibrate();</script>",
+                                unsafe_allow_html=True)
                     st.session_state["reset_order_fields"] = True
                     st.rerun()
             except (ValueError, AttributeError):
@@ -736,31 +773,27 @@ def show_main_page():
     else:
         total_income = 0.0
 
-    # ===== ЗАКРЫТИЕ СМЕНЫ И РАСХОДЫ — заметные кнопки =====
+    # ===== РАСХОДЫ И ЗАКРЫТИЕ — кнопки-переключатели =====
     st.divider()
     total_extra = get_total_extra_expenses(shift_id)
+
     col_exp, col_close = st.columns(2)
-
-    # Кнопка расходов — открывает expander
     with col_exp:
-        st.markdown(f"""
-        <div style="background:#fff7ed;border:2px solid #fb923c;border-radius:12px;
-        padding:10px;text-align:center;margin-bottom:8px;">
-        <div style="font-size:1.4rem;">💸</div>
-        <div style="font-weight:700;color:#ea580c;">Расходы</div>
-        <div style="font-size:0.85rem;color:#9a3412;">{total_extra:.0f} ₽</div>
-        </div>""", unsafe_allow_html=True)
-
+        exp_label = f"💸 Расходы  {total_extra:.0f} ₽" if total_extra > 0 else "💸 Добавить расход"
+        if st.button(exp_label, use_container_width=True, key="btn_toggle_exp"):
+            st.session_state["show_expenses"] = not st.session_state.get("show_expenses", False)
+            st.rerun()
     with col_close:
-        st.markdown(f"""
-        <div style="background:#fef2f2;border:2px solid #f87171;border-radius:12px;
-        padding:10px;text-align:center;margin-bottom:8px;">
-        <div style="font-size:1.4rem;">🔒</div>
-        <div style="font-weight:700;color:#dc2626;">Закрыть смену</div>
-        <div style="font-size:0.85rem;color:#7f1d1d;">Завершить работу</div>
-        </div>""", unsafe_allow_html=True)
+        if st.button("🔒 Закрыть смену", use_container_width=True, key="btn_toggle_close",
+                     type="primary"):
+            st.session_state["show_close"] = not st.session_state.get("show_close", False)
+            st.rerun()
 
-    with st.expander("💸 Расходы — добавить / QR-сканер", expanded=False):
+    # Блок расходов
+    if st.session_state.get("show_expenses", False):
+        with st.container():
+            st.markdown("---")
+            st.markdown("### 💸 Расходы")
 
         # --- QR-сканер ---
         st.markdown("**📷 Сканировать QR с чека:**")
@@ -872,6 +905,48 @@ def show_main_page():
                 c1.markdown(f"**{exp['description']}** — {exp['amount']:.0f} ₽")
                 if c2.button("🗑️", key=f"del_exp_{exp['id']}", use_container_width=True):
                     delete_extra_expense(exp["id"]); st.rerun()
+            if st.button("✖️ Скрыть расходы", use_container_width=True, key="btn_hide_exp"):
+                st.session_state["show_expenses"] = False; st.rerun()
+
+    # Блок закрытия смены
+    if st.session_state.get("show_close", False):
+        with st.container():
+            st.markdown("---")
+            st.markdown("### ⛽ Закрыть смену")
+            last_cons, last_price = get_last_fuel_params()
+            km = st.number_input("🛣️ Пробег (км)", value=100, min_value=0, key="km_close")
+            c1, c2 = st.columns(2)
+            with c1: cons = st.number_input("⛽ Расход л/100км", value=float(last_cons), step=0.5, key="cons_close")
+            with c2: price = st.number_input("💰 Цена топлива ₽/л", value=float(last_price), step=1.0, key="fuel_close")
+            if km > 0 and cons > 0:
+                liters = (km / 100) * cons
+                st.info(f"🛢️ {liters:.1f} л × {price:.0f} ₽ = **{liters * price:.0f} ₽**")
+            if not st.session_state.get("confirm_close"):
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Да, закрыть смену", use_container_width=True, type="primary", key="btn_do_close"):
+                    st.session_state.confirm_close = True; st.rerun()
+                if c2.button("✖️ Отмена", use_container_width=True, key="btn_cancel_close"):
+                    st.session_state["show_close"] = False; st.rerun()
+            else:
+                st.error("⚠️ Последнее подтверждение — смена будет закрыта!")
+                c1, c2 = st.columns(2)
+                if c1.button("🔒 ЗАКРЫТЬ", use_container_width=True, type="primary", key="btn_confirm_close"):
+                    liters_val = (km / 100) * cons if km > 0 else 0.0
+                    close_shift_db(shift_id, km, liters_val, price)
+                    st.session_state.pop("confirm_close", None)
+                    st.session_state["show_close"] = False
+                    st.cache_data.clear()
+                    token = get_yadisk_token()
+                    if token:
+                        try:
+                            if yadisk_upload_backup(token, shift_date=date_str):
+                                st.success("✅ Смена закрыта · Бэкап → Яндекс Диск")
+                            else: st.warning("⚠️ Смена закрыта, бэкап не удался")
+                        except Exception as e: st.warning(f"⚠️ Смена закрыта, ошибка: {e}")
+                    else: st.success("✅ Смена закрыта")
+                    st.rerun()
+                if c2.button("❌ Нет, не закрывать", use_container_width=True, key="btn_abort_close"):
+                    st.session_state.pop("confirm_close", None); st.rerun()
 
     # ===== ИТОГ =====
     st.divider()
@@ -880,39 +955,6 @@ def show_main_page():
     c1.metric("💰 Доход", f"{total_income:.0f} ₽")
     c2.metric("💸 Расходы", f"{total_extra:.0f} ₽")
     c3.metric("📈 Прибыль", f"{profit:.0f} ₽", delta=f"{profit:.0f}")
-
-    # ===== ЗАКРЫТИЕ СМЕНЫ =====
-    with st.expander("⛽ Закрыть смену", expanded=False):
-        last_cons, last_price = get_last_fuel_params()
-        km = st.number_input("🛣️ Пробег (км)", value=100, min_value=0, key="km_close")
-        c1, c2 = st.columns(2)
-        with c1: cons = st.number_input("⛽ Расход л/100км", value=float(last_cons), step=0.5, key="cons_close")
-        with c2: price = st.number_input("💰 Цена топлива ₽/л", value=float(last_price), step=1.0, key="fuel_close")
-        if km > 0 and cons > 0:
-            liters = (km / 100) * cons
-            st.info(f"🛢️ {liters:.1f} л × {price:.0f} ₽ = **{liters * price:.0f} ₽**")
-        if not st.session_state.get("confirm_close"):
-            if st.button("🔒 Закрыть смену", use_container_width=True, type="primary"):
-                st.session_state.confirm_close = True; st.rerun()
-        else:
-            st.warning("⚠️ Подтвердите закрытие")
-            c1, c2 = st.columns(2)
-            if c1.button("✅ Да, закрыть", use_container_width=True, type="primary"):
-                liters_val = (km / 100) * cons if km > 0 else 0.0
-                close_shift_db(shift_id, km, liters_val, price)
-                st.session_state.pop("confirm_close", None); st.cache_data.clear()
-                # Автобэкап на Яндекс Диск
-                token = get_yadisk_token()
-                if token:
-                    try:
-                        if yadisk_upload_backup(token, shift_date=date_str):
-                            st.success(f"✅ Смена закрыта. Бэкап → Яндекс Диск")
-                        else: st.warning("⚠️ Смена закрыта, бэкап не удался")
-                    except Exception as e: st.warning(f"⚠️ Смена закрыта, ошибка бэкапа: {e}")
-                else: st.success("✅ Смена закрыта")
-                st.rerun()
-            if c2.button("❌ Отмена", use_container_width=True):
-                st.session_state.pop("confirm_close", None); st.rerun()
 
 # ===== UI: ОТЧЁТЫ =====
 def show_reports_page():
