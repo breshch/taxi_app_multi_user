@@ -16,9 +16,7 @@ from passlib.hash import bcrypt
 AUTH_DB = "users.db"
 USERS_DIR = "users"
 SESSION_FILE = "session.json"
-SESSION_TIMEOUT = 7 * 24 * 60 * 60  # 7 дней — не выбрасывает при простое
-RATE_NAL = 0.78
-RATE_CARD = 0.75
+SESSION_TIMEOUT = 7 * 24 * 60 * 60
 MOSCOW_TZ = timezone(timedelta(hours=3))
 YADISK_API = "https://cloud-api.yandex.net/v1/disk"
 YADISK_ROOT = "disk:/jet"
@@ -27,6 +25,9 @@ POPULAR_EXPENSES = [
     "🔧 Мелкий ремонт", "🅿️ Парковка", "💰 Штраф", "🧴 Очиститель",
     "🔋 Зарядка", "🧰 Инструмент", "📱 Связь", "🚕 Аренда", "💊 Аптека"
 ]
+# Ставки по умолчанию (переопределяются из настроек пользователя)
+RATE_NAL = 0.78
+RATE_CARD = 0.75
 
 def get_master_admin_pwd() -> str:
     try: return st.secrets.get("MASTER_ADMIN_PASSWORD", "")
@@ -49,6 +50,34 @@ def apply_css():
     h1 { font-size:1.5rem !important; } h2 { font-size:1.3rem !important; } h3 { font-size:1.1rem !important; }
     hr { margin:.5rem 0 !important; }
     </style>""", unsafe_allow_html=True)
+
+def inject_autologin_js(token: str):
+    """Сохраняет токен в localStorage браузера."""
+    st.markdown(f"""<script>
+    (function(){{
+        try {{ localStorage.setItem('taxi_autologin', '{token}'); }} catch(e) {{}}
+    }})();
+    </script>""", unsafe_allow_html=True)
+
+def read_autologin_js():
+    """Читает токен из localStorage и передаёт через query params."""
+    st.markdown("""<script>
+    (function(){
+        try {
+            var t = localStorage.getItem('taxi_autologin');
+            if (t && !window.location.search.includes('autologin=')) {
+                var url = window.location.href.split('?')[0] + '?autologin=' + encodeURIComponent(t);
+                window.parent.location.replace(url);
+            }
+        } catch(e) {}
+    })();
+    </script>""", unsafe_allow_html=True)
+
+def clear_autologin_js():
+    """Очищает токен из localStorage."""
+    st.markdown("""<script>
+    try { localStorage.removeItem('taxi_autologin'); } catch(e) {}
+    </script>""", unsafe_allow_html=True)
 
 # ===== СЕССИЯ =====
 def save_session():
@@ -132,6 +161,19 @@ def check_and_create_tables():
             driver_name TEXT DEFAULT '', driver_number TEXT DEFAULT '',
             photo_base64 TEXT DEFAULT '', name_font_size INTEGER DEFAULT 28,
             updated_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS user_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rate_nal REAL DEFAULT 0.78,
+            rate_card REAL DEFAULT 0.75,
+            tax_mode TEXT DEFAULT 'none',
+            tax_rate REAL DEFAULT 0.0,
+            updated_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS autologin_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            last_used TEXT,
+            device_hint TEXT DEFAULT '')""")
         c.execute("SELECT id FROM accumulated_beznal WHERE driver_id=1")
         if not c.fetchone():
             c.execute("INSERT INTO accumulated_beznal (driver_id,total_amount,last_updated) VALUES (1,0,?)",
@@ -220,6 +262,108 @@ def save_user_profile(name: str, number: str, photo_b64: str, font_size: int):
 def delete_user_photo():
     conn = get_db(); c = conn.cursor()
     c.execute("UPDATE user_profile SET photo_base64='' WHERE 1"); conn.commit(); conn.close()
+
+# ===== НАСТРОЙКИ СТАВОК И НАЛОГА =====
+def get_user_settings() -> dict:
+    """Возвращает настройки комиссий и налога пользователя."""
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT rate_nal, rate_card, tax_mode, tax_rate FROM user_settings LIMIT 1")
+    row = c.fetchone(); conn.close()
+    if row:
+        return {"rate_nal": float(row[0] or 0.78), "rate_card": float(row[1] or 0.75),
+                "tax_mode": row[2] or "none", "tax_rate": float(row[3] or 0.0)}
+    return {"rate_nal": 0.78, "rate_card": 0.75, "tax_mode": "none", "tax_rate": 0.0}
+
+def save_user_settings(rate_nal: float, rate_card: float, tax_mode: str, tax_rate: float):
+    conn = get_db(); c = conn.cursor(); now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("SELECT id FROM user_settings LIMIT 1")
+    if c.fetchone():
+        c.execute("UPDATE user_settings SET rate_nal=?,rate_card=?,tax_mode=?,tax_rate=?,updated_at=? WHERE 1",
+                  (rate_nal, rate_card, tax_mode, tax_rate, now))
+    else:
+        c.execute("INSERT INTO user_settings (rate_nal,rate_card,tax_mode,tax_rate,updated_at) VALUES (?,?,?,?,?)",
+                  (rate_nal, rate_card, tax_mode, tax_rate, now))
+    conn.commit(); conn.close()
+
+def get_rates() -> tuple:
+    """Возвращает (rate_nal, rate_card) для текущего пользователя."""
+    s = get_user_settings()
+    return s["rate_nal"], s["rate_card"]
+
+# ===== АВТОЛОГИН ПО ТОКЕНУ =====
+def generate_autologin_token(device_hint: str = "") -> str:
+    """Создаёт уникальный токен автологина для текущего пользователя."""
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(32)
+    conn = get_db(); c = conn.cursor(); now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO autologin_tokens (token, created_at, last_used, device_hint) VALUES (?,?,?,?)",
+              (token, now, now, device_hint))
+    conn.commit(); conn.close()
+    return token
+
+def validate_autologin_token(token: str) -> bool:
+    """Проверяет токен. Обновляет last_used. Возвращает True если валиден (не старше 4ч простоя)."""
+    if not token: return False
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT last_used FROM autologin_tokens WHERE token=?", (token,))
+    row = c.fetchone()
+    if not row: conn.close(); return False
+    try:
+        last_used = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=MOSCOW_TZ)
+        idle = (datetime.now(MOSCOW_TZ) - last_used).total_seconds()
+        if idle > 4 * 3600:  # простой > 4 часов — токен устарел
+            conn.close(); return False
+    except Exception:
+        conn.close(); return False
+    # Обновляем last_used
+    now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("UPDATE autologin_tokens SET last_used=? WHERE token=?", (now, token))
+    conn.commit(); conn.close()
+    return True
+
+def revoke_autologin_token(token: str):
+    conn = get_db(); c = conn.cursor()
+    c.execute("DELETE FROM autologin_tokens WHERE token=?", (token,))
+    conn.commit(); conn.close()
+
+def list_autologin_tokens() -> list:
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT token, created_at, last_used, device_hint FROM autologin_tokens ORDER BY created_at DESC")
+    rows = c.fetchall(); conn.close()
+    return [{"token": r[0], "created": r[1], "last_used": r[2], "device": r[3] or ""} for r in rows]
+
+# Глобальная таблица token→username для auth_db
+def get_username_by_token(token: str) -> str | None:
+    """Ищет токен во всех БД пользователей. Возвращает username или None."""
+    if not token: return None
+    ensure_users_dir()
+    for username in os.listdir(USERS_DIR):
+        udir = os.path.join(USERS_DIR, username)
+        if not os.path.isdir(udir): continue
+        safe = "".join(c for c in username if c.isalnum() or c in ("_", "-"))
+        db_path = os.path.join(udir, f"taxi{safe}.db")
+        if not os.path.exists(db_path): continue
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT last_used FROM autologin_tokens WHERE token=?", (token,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                try:
+                    last_used = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=MOSCOW_TZ)
+                    if (datetime.now(MOSCOW_TZ) - last_used).total_seconds() <= 4 * 3600:
+                        # Обновляем last_used
+                        conn2 = sqlite3.connect(db_path)
+                        conn2.execute("UPDATE autologin_tokens SET last_used=? WHERE token=?",
+                                     (datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:%S"), token))
+                        conn2.commit(); conn2.close()
+                        return username
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return None
 
 # ===== СМЕНЫ =====
 def get_open_shift():
@@ -674,6 +818,7 @@ def show_main_page():
             st.session_state.pop(k, None)
 
     with st.expander("➕ Добавить заказ", expanded=True):
+        rate_nal, rate_card = get_rates()
         col1, col2 = st.columns([3, 2])
         with col1:
             amount_str = st.text_input("💰 Сумма чеком (₽)", placeholder="650", key="order_amount")
@@ -687,10 +832,10 @@ def show_main_page():
             pt = float(tips_str.replace(",", ".")) if tips_str else 0.0
             if pa > 0:
                 if order_type == "нал":
-                    pc = pa * (1 - RATE_NAL)
+                    pc = pa * (1 - rate_nal)
                     st.caption(f"📊 Комиссия: **{pc:.0f} ₽** | На руки: **{pa + pt:.0f} ₽** | Безнал: **{-pc:+.0f} ₽**")
                 else:
-                    pf = pa * RATE_CARD
+                    pf = pa * rate_card
                     st.caption(f"📊 Комиссия: **{pa - pf:.0f} ₽** | На руки: **{pf + pt:.0f} ₽** | Безнал: **+{pf:.0f} ₽**")
         except: pass
 
@@ -702,9 +847,9 @@ def show_main_page():
                 else:
                     order_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
                     if order_type == "нал":
-                        commission = amount * (1 - RATE_NAL); total = amount + tips; beznal_added = -commission; db_type = "нал"
+                        commission = amount * (1 - rate_nal); total = amount + tips; beznal_added = -commission; db_type = "нал"
                     else:
-                        final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
+                        final = amount * rate_card; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
                     add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
                     # Вибро при успехе
                     st.markdown("<script>window._vibrate && window._vibrate();</script>",
@@ -1264,6 +1409,107 @@ YADISK_TOKEN = "y0_AgAAAA..."
             save_user_profile(p_name.strip(), p_number.strip(), save_to_use, p_font)
             st.success("✅ Профиль сохранён!"); st.rerun()
 
+        # ===== НАСТРОЙКИ СТАВОК =====
+        st.divider()
+        st.markdown("#### 💰 Ставки комиссии и налог")
+        settings = get_user_settings()
+
+        PRESETS = {
+            "Яндекс Такси (нал 78%, карта 75%)": (0.78, 0.75),
+            "Ситимобил (нал 80%, карта 77%)":     (0.80, 0.77),
+            "Uber (нал 75%, карта 72%)":           (0.75, 0.72),
+            "Произвольные":                         None,
+        }
+        preset_names = list(PRESETS.keys())
+        cur_nal = settings["rate_nal"]; cur_card = settings["rate_card"]
+        # Определяем текущий пресет
+        default_preset = "Произвольные"
+        for name, vals in PRESETS.items():
+            if vals and abs(vals[0] - cur_nal) < 0.001 and abs(vals[1] - cur_card) < 0.001:
+                default_preset = name; break
+
+        chosen = st.selectbox("🚕 Агрегатор / пресет",
+                              preset_names, index=preset_names.index(default_preset),
+                              key="rate_preset")
+        if PRESETS[chosen]:
+            new_nal, new_card = PRESETS[chosen]
+            st.caption(f"Нал: {new_nal*100:.0f}% · Карта: {new_card*100:.0f}%")
+        else:
+            c1, c2 = st.columns(2)
+            with c1: new_nal = st.number_input("% нал (доля водителю)", min_value=0.5, max_value=1.0,
+                                                value=cur_nal, step=0.01, format="%.2f", key="rate_nal_inp")
+            with c2: new_card = st.number_input("% карта (доля водителю)", min_value=0.5, max_value=1.0,
+                                                 value=cur_card, step=0.01, format="%.2f", key="rate_card_inp")
+
+        st.markdown("**Налог:**")
+        TAX_MODES = {
+            "none":  "Без налога",
+            "self":  "Самозанятый — 4% (физлица) / 6% (ИП)",
+            "ooo":   "ООО / ИП на УСН — произвольный %",
+            "custom":"Произвольный %",
+        }
+        tax_mode = st.selectbox("Режим налогообложения",
+                                list(TAX_MODES.keys()),
+                                format_func=lambda k: TAX_MODES[k],
+                                index=list(TAX_MODES.keys()).index(settings["tax_mode"]),
+                                key="tax_mode_sel")
+        if tax_mode == "none":
+            new_tax = 0.0
+            st.caption("Налог не учитывается")
+        elif tax_mode == "self":
+            self_rate = st.selectbox("Ставка самозанятого", [4.0, 6.0],
+                                     index=0 if settings["tax_rate"] <= 4.0 else 1,
+                                     key="self_tax_rate")
+            new_tax = self_rate / 100
+            st.caption(f"С каждого дохода вычитается {self_rate:.0f}%")
+        else:
+            new_tax = st.number_input("Ставка налога (%)", min_value=0.0, max_value=50.0,
+                                      value=settings["tax_rate"] * 100, step=0.5,
+                                      key="custom_tax_inp") / 100
+
+        # Показываем пример расчёта
+        ex = 1000.0
+        ex_nal_net = ex * new_nal * (1 - new_tax)
+        ex_card_net = ex * new_card * (1 - new_tax)
+        st.caption(f"📊 Пример для 1000 ₽: нал → **{ex_nal_net:.0f} ₽** · карта → **{ex_card_net:.0f} ₽** (после комиссии и налога)")
+
+        if st.button("💾 Сохранить ставки", use_container_width=True, type="primary", key="btn_save_rates"):
+            save_user_settings(new_nal, new_card, tax_mode, new_tax)
+            st.success("✅ Ставки сохранены!"); st.rerun()
+
+        # ===== АВТОЛОГИН =====
+        st.divider()
+        st.markdown("#### 📱 Автовход с телефона")
+        st.info("Создайте ключ — браузер запомнит вас на 4 часа простоя. При открытии сайта входить не нужно.")
+
+        tokens = list_autologin_tokens()
+        if tokens:
+            st.caption(f"Активных ключей: {len(tokens)}")
+            for t in tokens:
+                idle_str = ""
+                try:
+                    lu = datetime.strptime(t["last_used"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=MOSCOW_TZ)
+                    idle_min = int((datetime.now(MOSCOW_TZ) - lu).total_seconds() / 60)
+                    idle_str = f" · был активен {idle_min} мин назад"
+                except Exception: pass
+                c1, c2 = st.columns([4, 1])
+                device = t["device"] or "Устройство"
+                c1.caption(f"📱 {device}{idle_str}")
+                if c2.button("🗑️", key=f"rev_tok_{t['token'][:8]}", use_container_width=True):
+                    revoke_autologin_token(t["token"]); st.rerun()
+
+        device_name = st.text_input("Название устройства (необязательно)",
+                                     placeholder="Мой телефон", key="device_name_inp")
+        if st.button("🔑 Создать ключ автовхода", use_container_width=True, type="primary", key="btn_gen_token"):
+            new_token = generate_autologin_token(device_name.strip() or "Устройство")
+            st.session_state["pending_autologin_token"] = new_token
+            st.success("✅ Ключ создан! Он будет сохранён в браузере этого устройства.")
+
+        # Если есть pending токен — инжектируем его в localStorage
+        pending = st.session_state.pop("pending_autologin_token", None)
+        if pending:
+            inject_autologin_js(pending)
+
     # ===== TAB 4: СБРОС =====
     with tab4:
         st.markdown("### ⚠️ Опасная зона")
@@ -1401,13 +1647,39 @@ if __name__ == "__main__":
                        layout="wide", initial_sidebar_state="expanded")
     apply_css(); init_auth_db(); ensure_users_dir(); init_session()
 
+    # ===== АВТОЛОГИН — проверяем query param ?autologin=TOKEN =====
+    if "username" not in st.session_state:
+        params = st.query_params
+        auto_token = params.get("autologin", "")
+        if auto_token:
+            found_user = get_username_by_token(auto_token)
+            if found_user:
+                st.session_state.username = found_user
+                st.session_state.page = "main"
+                st.session_state.autologin_token = auto_token
+                save_session()
+                # Убираем токен из URL
+                st.query_params.clear()
+                st.rerun()
+            else:
+                # Токен устарел — чистим localStorage
+                clear_autologin_js()
+                st.query_params.clear()
+
+    # Восстанавливаем сессию с диска
     saved = load_session()
     if saved and "username" not in st.session_state:
         st.session_state.username = saved
         if "page" not in st.session_state: st.session_state.page = "main"
 
     if "username" not in st.session_state:
+        # На странице входа — читаем токен из localStorage (JS перенаправит если найдёт)
+        read_autologin_js()
         show_login_page(); st.stop()
+
+    # Для залогиненных — периодически обновляем токен в localStorage
+    if st.session_state.get("autologin_token"):
+        inject_autologin_js(st.session_state["autologin_token"])
 
     # ===== САЙДБАР =====
     with st.sidebar:
@@ -1449,6 +1721,10 @@ if __name__ == "__main__":
             st.session_state.page = "admin"; st.rerun()
         st.divider()
         if st.button("👋 Выйти", use_container_width=True):
+            # При выходе — чистим автологин токен
+            if st.session_state.get("autologin_token"):
+                revoke_autologin_token(st.session_state["autologin_token"])
+            clear_autologin_js()
             clear_session(); st.session_state.clear(); st.rerun()
 
     page = st.session_state.get("page", "main")
