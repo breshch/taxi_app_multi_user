@@ -16,7 +16,7 @@ from passlib.hash import bcrypt
 AUTH_DB = "users.db"
 USERS_DIR = "users"
 SESSION_FILE = "session.json"
-SESSION_TIMEOUT = 7 * 24 * 60 * 60  # 7 дней — не выбрасывает при простое
+SESSION_TIMEOUT = 7 * 24 * 60 * 60  # 7 дней
 RATE_NAL = 0.78
 RATE_CARD = 0.75
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -52,22 +52,31 @@ def apply_css():
 
 # ===== СЕССИЯ =====
 def save_session():
+    # Не сохраняем сессию если пользователь не авторизован
+    username = st.session_state.get("username")
+    if not username:
+        return
     try:
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump({"username": st.session_state.get("username"),
-                       "session_start": st.session_state.get("session_start").isoformat()
-                       if st.session_state.get("session_start") else None}, f)
+            json.dump({
+                "username": username,
+                "session_start": st.session_state.get("session_start").isoformat()
+                    if st.session_state.get("session_start") else None
+            }, f)
     except Exception: pass
 
 def load_session():
     try:
         if os.path.exists(SESSION_FILE):
             data = json.load(open(SESSION_FILE, "r", encoding="utf-8"))
+            username = data.get("username")
+            if not username:
+                return None
             start = data.get("session_start")
             if start:
                 dt = datetime.fromisoformat(start).replace(tzinfo=MOSCOW_TZ)
                 if (datetime.now(MOSCOW_TZ) - dt).total_seconds() < SESSION_TIMEOUT:
-                    return data.get("username")
+                    return username
     except Exception: pass
     return None
 
@@ -79,11 +88,11 @@ def clear_session():
 def init_session():
     if "session_start" not in st.session_state:
         st.session_state.session_start = datetime.now(MOSCOW_TZ)
-        save_session()
     else:
         # Обновляем время при каждом заходе — сессия не истекает пока пользуются
         st.session_state.session_start = datetime.now(MOSCOW_TZ)
-        save_session()
+    # Сохраняем только если пользователь уже авторизован
+    save_session()
     if (datetime.now(MOSCOW_TZ) - st.session_state.session_start).total_seconds() > SESSION_TIMEOUT:
         st.session_state.clear(); clear_session()
         st.warning("⏰ Сессия истекла"); st.rerun()
@@ -516,27 +525,52 @@ def yadisk_delete_backup(token: str, remote_path: str) -> bool:
     except Exception as e:
         return getattr(e, "code", 0) in (200, 204)
 
+def yadisk_cleanup_old_backups(token: str, keep: int = 3, min_age_days: int = 7) -> int:
+    """
+    Удаляет старые бэкапы на Яндекс Диске.
+    Правило: если бэкап старше min_age_days И есть как минимум keep более новых — удалить.
+    Всегда оставляет keep самых свежих бэкапов независимо от возраста.
+    Возвращает количество удалённых файлов.
+    """
+    if not token: return 0
+    backups = yadisk_list_backups(token)
+    if len(backups) <= keep: return 0  # нечего удалять
+
+    # backups отсортированы по имени desc (новые первые)
+    # Те что за пределами keep последних — кандидаты на удаление
+    candidates = backups[keep:]
+    now = datetime.now(MOSCOW_TZ)
+    deleted = 0
+
+    for b in candidates:
+        # Парсим дату из имени файла: backup_YYYY-MM-DD.db
+        try:
+            name = b["name"]  # например backup_2026-03-01.db
+            date_part = name.replace("backup_", "").replace(".db", "")  # 2026-03-01
+            backup_dt = datetime.strptime(date_part, "%Y-%m-%d").replace(tzinfo=MOSCOW_TZ)
+            age_days = (now - backup_dt).days
+        except Exception:
+            continue  # если не можем распарсить дату — не трогаем
+
+        if age_days >= min_age_days:
+            if yadisk_delete_backup(token, b["path"]):
+                deleted += 1
+
+    return deleted
+
 # ===== QR-КОД ЧЕКА =====
 def parse_qr_text(text: str) -> dict:
-    """Парсит текст QR-кода российского кассового чека.
-    Формат ФНС: t=20240315T1423&s=450.00&fn=...&i=...&fp=...&n=1
-    Возвращает dict с ключами: amount, date, raw."""
     result = {"amount": None, "date": None, "raw": text.strip()}
     if not text:
         return result
     try:
         import urllib.parse as _up
-        # Убираем возможный префикс https://proverkacheka.com/?qr= и подобные
         qr = text.strip()
         if "?" in qr:
             qr = qr.split("?", 1)[1]
         params = dict(_up.parse_qsl(qr, keep_blank_values=True))
-
-        # Сумма: s=450.00
         if "s" in params:
             result["amount"] = float(params["s"].replace(",", "."))
-
-        # Дата: t=20240315T1423 → 2024-03-15
         if "t" in params:
             t = params["t"]
             if len(t) >= 8:
@@ -545,9 +579,7 @@ def parse_qr_text(text: str) -> dict:
         pass
     return result
 
-
 def decode_qr_image(image_bytes: bytes) -> str:
-    """Декодирует QR-код из байтов изображения. Возвращает текст или ''."""
     try:
         from PIL import Image
         from pyzbar.pyzbar import decode
@@ -562,10 +594,7 @@ def decode_qr_image(image_bytes: bytes) -> str:
         pass
     return ""
 
-
-
 def render_profile_header():
-    """Шапка: фото/аватар слева, имя + позывной по центру, безнал справа."""
     profile = get_user_profile()
     acc = get_accumulated_beznal()
     font_size = profile.get("font_size", 28)
@@ -618,7 +647,9 @@ def show_login_page():
             if authenticate_user(u, p):
                 st.session_state.username = u.strip()
                 st.session_state.page = "main"
-                save_session(); st.rerun()
+                st.session_state.session_start = datetime.now(MOSCOW_TZ)
+                save_session()
+                st.rerun()
             else: st.error("❌ Неверный логин или пароль")
     with c2:
         if st.button("➕ Регистрация", use_container_width=True):
@@ -660,14 +691,6 @@ def show_main_page():
 
     st.success(f"✅ Смена: **{date_str}**")
 
-    # JS: виброотклик при добавлении заказа
-    st.markdown("""<script>
-    window._vibrate = function() {
-        if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
-    };
-    </script>""", unsafe_allow_html=True)
-
-    # ===== ДОБАВИТЬ ЗАКАЗ =====
     # Флаг сброса — очищаем ДО создания виджетов
     if st.session_state.pop("reset_order_fields", False):
         for k in ["order_amount", "order_tips"]:
@@ -706,9 +729,6 @@ def show_main_page():
                     else:
                         final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
                     add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
-                    # Вибро при успехе
-                    st.markdown("<script>window._vibrate && window._vibrate();</script>",
-                                unsafe_allow_html=True)
                     st.session_state["reset_order_fields"] = True
                     st.rerun()
             except (ValueError, AttributeError):
@@ -764,7 +784,7 @@ def show_main_page():
     else:
         total_income = 0.0
 
-    # ===== РАСХОДЫ И ЗАКРЫТИЕ — кнопки-переключатели =====
+    # ===== РАСХОДЫ И ЗАКРЫТИЕ =====
     st.divider()
     total_extra = get_total_extra_expenses(shift_id)
 
@@ -775,8 +795,7 @@ def show_main_page():
             st.session_state["show_expenses"] = not st.session_state.get("show_expenses", False)
             st.rerun()
     with col_close:
-        if st.button("🔒 Закрыть смену", use_container_width=True, key="btn_toggle_close",
-                     type="primary"):
+        if st.button("🔒 Закрыть смену", use_container_width=True, key="btn_toggle_close", type="primary"):
             st.session_state["show_close"] = not st.session_state.get("show_close", False)
             st.rerun()
 
@@ -786,12 +805,10 @@ def show_main_page():
             st.markdown("---")
             st.markdown("### 💸 Расходы")
 
-        # --- QR-сканер ---
         st.markdown("**📷 Сканировать QR с чека:**")
         qr_tab1, qr_tab2, qr_tab3 = st.tabs(["📸 Камера", "🖼️ Загрузить фото", "📋 Текст из QR"])
 
         def _save_qr_result(img_bytes) -> bool:
-            """Декодирует QR, сохраняет результат. Возвращает True если нашли сумму."""
             qr_text = decode_qr_image(img_bytes)
             if qr_text == "__no_pyzbar__":
                 st.warning("⚠️ pyzbar не установлен. Используйте вкладку 'Текст из QR'.")
@@ -810,18 +827,6 @@ def show_main_page():
             return False
 
         with qr_tab1:
-            st.markdown("""<script>
-            setTimeout(function() {
-                var videos = window.parent.document.querySelectorAll('video');
-                videos.forEach(function(v) {
-                    if (v.srcObject) {
-                        v.srcObject.getVideoTracks().forEach(function(t) {
-                            t.applyConstraints({facingMode:'environment'}).catch(function(){});
-                        });
-                    }
-                });
-            }, 1000);
-            </script>""", unsafe_allow_html=True)
             st.caption("📷 Задняя камера — наведите на QR-код чека")
             cam = st.camera_input("Сфотографировать QR", key="qr_camera")
             if cam and not st.session_state.get("qr_amount"):
@@ -854,7 +859,6 @@ def show_main_page():
 
         st.divider()
 
-        # --- Форма расхода ---
         qr_amount = st.session_state.get("qr_amount")
         qr_date = st.session_state.get("qr_date", "")
 
@@ -863,7 +867,6 @@ def show_main_page():
 
         exp_desc = st.selectbox("📝 Тип расхода", POPULAR_EXPENSES, key="exp_desc")
 
-        # Используем динамический ключ — при новом QR ключ меняется, виджет пересоздаётся с новым value
         amt_widget_key = f"exp_amt_{int(qr_amount * 100) if qr_amount else 0}"
         default_val = float(qr_amount) if qr_amount else 100.0
         exp_amt = st.number_input("💰 Сумма (₽)", min_value=0.0, step=10.0,
@@ -884,10 +887,8 @@ def show_main_page():
             if c2.button("✖️ Сбросить QR", use_container_width=True, key="btn_reset_qr"):
                 st.session_state.pop("qr_amount", None)
                 st.session_state.pop("qr_date", None)
-                st.session_state.pop("exp_amt", None)
                 st.rerun()
 
-        # Список расходов
         expenses = get_extra_expenses(shift_id)
         if expenses:
             st.divider()
@@ -931,7 +932,12 @@ def show_main_page():
                     if token:
                         try:
                             if yadisk_upload_backup(token, shift_date=date_str):
-                                st.success("✅ Смена закрыта · Бэкап → Яндекс Диск")
+                                # Автоочистка: оставляем 3 последних, удаляем старше 7 дней
+                                cleaned = yadisk_cleanup_old_backups(token, keep=3, min_age_days=7)
+                                msg = "✅ Смена закрыта · Бэкап → Яндекс Диск"
+                                if cleaned > 0:
+                                    msg += f" · 🗑️ удалено старых: {cleaned}"
+                                st.success(msg)
                             else: st.warning("⚠️ Смена закрыта, бэкап не удался")
                         except Exception as e: st.warning(f"⚠️ Смена закрыта, ошибка: {e}")
                     else: st.success("✅ Смена закрыта")
@@ -1002,6 +1008,8 @@ def show_reports_page():
                     "Смена №", "Время", "Тип", "Чек ₽", "Чаевые ₽",
                     "Комиссия ₽", "На руки ₽", "Δ Безнал ₽"
                 ])
+                # Добавляем порядковый номер строки
+                orders_df.insert(0, "№", range(1, len(orders_df) + 1))
                 orders_df["Чек ₽"] = orders_df["Чек ₽"].round(0).astype(int)
                 orders_df["Чаевые ₽"] = orders_df["Чаевые ₽"].round(0).astype(int)
                 orders_df["Комиссия ₽"] = orders_df["Комиссия ₽"].round(0).astype(int)
@@ -1043,12 +1051,8 @@ def show_admin_page():
     st.markdown("## 🔧 Настройки")
     current_user = st.session_state.get("username", "")
 
-    # Каждый пользователь — администратор своего аккаунта, пароль не нужен
-    # Мастер-админ — отдельная вкладка с паролем из secrets
-
     master_pwd = get_master_admin_pwd()
 
-    # Определяем набор вкладок
     if is_master_admin():
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "💾 Бэкап", "💳 Безнал", "👤 Профиль", "⚠️ Сброс", "👑 Мастер-админ"
@@ -1093,7 +1097,13 @@ YADISK_TOKEN = "y0_AgAAAA..."
             if st.button("📤 Загрузить сейчас", use_container_width=True, type="primary"):
                 with st.spinner("Загружаю..."):
                     ds = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-                    if yadisk_upload_backup(tok, shift_date=ds): st.success(f"✅ backup_{ds}.db")
+                    if yadisk_upload_backup(tok, shift_date=ds):
+                        cleaned = yadisk_cleanup_old_backups(tok, keep=3, min_age_days=7)
+                        msg = f"✅ backup_{ds}.db"
+                        if cleaned > 0:
+                            msg += f" · 🗑️ удалено старых: {cleaned}"
+                        st.success(msg)
+                        st.rerun()
         with c2:
             if st.button("📥 Восстановить последний", use_container_width=True):
                 with st.spinner("Скачиваю..."):
@@ -1107,6 +1117,23 @@ YADISK_TOKEN = "y0_AgAAAA..."
             with st.spinner("Загружаю список..."):
                 yd_backups = yadisk_list_backups(tok)
             if yd_backups:
+                # Статус и кнопка ручной очистки
+                total_b = len(yd_backups)
+                old_b = max(0, total_b - 3)
+                info_parts = [f"Всего бэкапов: **{total_b}**"]
+                if old_b > 0:
+                    info_parts.append(f"можно удалить старых: **{old_b}**")
+                st.caption(" · ".join(info_parts))
+                if old_b > 0:
+                    if st.button(f"🗑️ Очистить старые (оставить 3 последних)", use_container_width=True, key="yd_cleanup_btn"):
+                        with st.spinner("Удаляю старые бэкапы..."):
+                            cleaned = yadisk_cleanup_old_backups(tok, keep=3, min_age_days=0)
+                            if cleaned > 0:
+                                st.success(f"✅ Удалено: {cleaned} бэкап(ов)")
+                            else:
+                                st.info("Нечего удалять")
+                            st.rerun()
+                st.divider()
                 for b in yd_backups:
                     c1, c2, c3 = st.columns([3, 1, 1])
                     c1.markdown(f"📄 **{b['name']}**  \n📅 {b['modified']} · {b['size_kb']} KB")
@@ -1241,7 +1268,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
             f"</div>", unsafe_allow_html=True)
 
         st.divider()
-        # Смена своего пароля
         st.markdown("#### 🔑 Сменить пароль")
         old_pwd = st.text_input("Текущий пароль", type="password", key="old_pwd")
         new_pwd1 = st.text_input("Новый пароль", type="password", key="new_pwd1")
@@ -1277,7 +1303,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                 except Exception as e: st.error(f"❌ {e}")
             else: st.error("❌ Введите СБРОС")
 
-    # ===== TAB 5: МАСТЕР-АДМИН (только если авторизован) =====
+    # ===== TAB 5: МАСТЕР-АДМИН =====
     if is_master_admin():
         with tab5:
             st.markdown("### 👑 Мастер-администратор")
@@ -1286,19 +1312,15 @@ YADISK_TOKEN = "y0_AgAAAA..."
             st.metric("👥 Всего пользователей", len(users))
             st.divider()
 
-            # Выбор пользователя
             usernames = [u["username"] for u in users]
-            selected_u = st.selectbox("👤 Выберите пользователя",
-                                       usernames, key="master_selected_user")
+            selected_u = st.selectbox("👤 Выберите пользователя", usernames, key="master_selected_user")
 
             if selected_u:
                 u_info = next((u for u in users if u["username"] == selected_u), None)
                 st.caption(f"Зарегистрирован: {u_info.get('created', '—')}")
 
-                # Профиль пользователя из его БД
                 orig_user = st.session_state.get("username")
                 try:
-                    # Временно переключаемся на БД выбранного пользователя
                     st.session_state["username"] = selected_u
                     u_profile = get_user_profile()
                     u_beznal = get_accumulated_beznal()
@@ -1381,7 +1403,6 @@ YADISK_TOKEN = "y0_AgAAAA..."
                 if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
                 else: st.error("❌ Логин занят или ошибка")
 
-    # Кнопка входа в мастер-админ (внизу страницы если ещё не вошёл)
     if not is_master_admin() and master_pwd:
         st.divider()
         with st.expander("👑 Вход для мастер-администратора", expanded=False):
@@ -1401,13 +1422,18 @@ if __name__ == "__main__":
                        layout="wide", initial_sidebar_state="expanded")
     apply_css(); init_auth_db(); ensure_users_dir(); init_session()
 
+    # Пробуем восстановить сессию из файла
     saved = load_session()
     if saved and "username" not in st.session_state:
         st.session_state.username = saved
-        if "page" not in st.session_state: st.session_state.page = "main"
+        if "page" not in st.session_state:
+            st.session_state.page = "main"
 
     if "username" not in st.session_state:
         show_login_page(); st.stop()
+
+    # Обновляем сессионный файл при каждом заходе авторизованного пользователя
+    save_session()
 
     # ===== САЙДБАР =====
     with st.sidebar:
