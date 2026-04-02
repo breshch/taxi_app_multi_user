@@ -1455,3 +1455,166 @@ if __name__ == "__main__":
     if page == "main": show_main_page()
     elif page == "reports": show_reports_page()
     elif page == "admin": show_admin_page()
+                u_info = next((u for u in users if u["username"] == selected_u), None)
+                st.caption(f"Зарегистрирован: {u_info.get('created', '—')}")
+
+                # Профиль пользователя из его БД
+                orig_user = st.session_state.get("username")
+                try:
+                    # Временно переключаемся на БД выбранного пользователя
+                    st.session_state["username"] = selected_u
+                    u_profile = get_user_profile()
+                    u_beznal = get_accumulated_beznal()
+                    st.session_state["username"] = orig_user
+                except Exception:
+                    st.session_state["username"] = orig_user
+                    u_profile = {"name": "", "number": "", "font_size": 28, "photo": ""}
+                    u_beznal = 0.0
+
+                st.markdown(f"**Имя:** {u_profile.get('name') or '—'} &nbsp; "
+                            f"**Позывной:** {u_profile.get('number') or '—'} &nbsp; "
+                            f"**Безнал:** {u_beznal:.0f} ₽")
+
+                st.divider()
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**✏️ Изменить имя водителя:**")
+                    new_name = st.text_input("Имя водителя", value=u_profile.get("name", ""),
+                                             key=f"master_name_{selected_u}")
+                    new_number = st.text_input("Позывной", value=u_profile.get("number", ""),
+                                               key=f"master_number_{selected_u}")
+                    if st.button("💾 Сохранить имя", use_container_width=True,
+                                 key=f"master_save_name_{selected_u}", type="primary"):
+                        try:
+                            st.session_state["username"] = selected_u
+                            save_user_profile(new_name.strip(), new_number.strip(),
+                                              u_profile.get("photo", ""),
+                                              u_profile.get("font_size", 28))
+                            st.session_state["username"] = orig_user
+                            st.success(f"✅ Имя {selected_u} обновлено")
+                        except Exception as e:
+                            st.session_state["username"] = orig_user
+                            st.error(f"❌ {e}")
+
+                with col2:
+                    st.markdown("**🔑 Сбросить пароль:**")
+                    new_pwd = st.text_input("Новый пароль", type="password",
+                                            key=f"master_pwd_{selected_u}",
+                                            placeholder="Минимум 4 символа")
+                    new_pwd2 = st.text_input("Повторить пароль", type="password",
+                                             key=f"master_pwd2_{selected_u}")
+                    if st.button("🔑 Сменить пароль", use_container_width=True,
+                                 key=f"master_chpwd_{selected_u}", type="primary"):
+                        if not new_pwd:
+                            st.warning("⚠️ Введите новый пароль")
+                        elif new_pwd != new_pwd2:
+                            st.error("❌ Пароли не совпадают")
+                        elif len(new_pwd) < 4:
+                            st.error("❌ Минимум 4 символа")
+                        elif change_password(selected_u, new_pwd):
+                            st.success(f"✅ Пароль {selected_u} изменён")
+                        else:
+                            st.error("❌ Ошибка")
+
+                if selected_u != current_user:
+                    st.divider()
+                    if not st.session_state.get(f"confirm_del_{selected_u}"):
+                        if st.button(f"🗑️ Удалить пользователя {selected_u}",
+                                     use_container_width=True, key=f"master_del_{selected_u}"):
+                            st.session_state[f"confirm_del_{selected_u}"] = True; st.rerun()
+                    else:
+                        st.error(f"⚠️ Удалить {selected_u}? Это необратимо!")
+                        c1, c2 = st.columns(2)
+                        if c1.button("✅ Да, удалить", use_container_width=True,
+                                     key=f"master_confirm_del_{selected_u}", type="primary"):
+                            delete_user(selected_u)
+                            st.session_state.pop(f"confirm_del_{selected_u}", None)
+                            st.success(f"✅ {selected_u} удалён"); st.rerun()
+                        if c2.button("❌ Отмена", use_container_width=True,
+                                     key=f"master_cancel_del_{selected_u}"):
+                            st.session_state.pop(f"confirm_del_{selected_u}", None); st.rerun()
+
+            st.divider()
+            st.markdown("**➕ Создать нового пользователя:**")
+            c1, c2 = st.columns(2)
+            with c1: new_u = st.text_input("👤 Логин", key="master_new_login")
+            with c2: new_p = st.text_input("🔑 Пароль", type="password", key="master_new_pwd")
+            if st.button("➕ Создать пользователя", use_container_width=True):
+                if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
+                else: st.error("❌ Логин занят или ошибка")
+
+    # Кнопка входа в мастер-админ (внизу страницы если ещё не вошёл)
+    if not is_master_admin() and master_pwd:
+        st.divider()
+        with st.expander("👑 Вход для мастер-администратора", expanded=False):
+            master_input = st.text_input("Мастер-пароль", type="password", key="master_pwd_input")
+            if st.button("🔐 Войти как мастер-админ", use_container_width=True):
+                if master_input == master_pwd:
+                    st.session_state.master_admin_auth = True
+                    st.success("✅ Добро пожаловать, мастер-админ!")
+                    st.rerun()
+                else:
+                    st.error("❌ Неверный мастер-пароль")
+
+
+# ===== MAIN =====
+if __name__ == "__main__":
+    st.set_page_config(page_title="Taxi Shift Manager", page_icon="🚕",
+                       layout="wide", initial_sidebar_state="expanded")
+    apply_css(); init_auth_db(); ensure_users_dir(); init_session()
+
+    saved = load_session()
+    if saved and "username" not in st.session_state:
+        st.session_state.username = saved
+        if "page" not in st.session_state: st.session_state.page = "main"
+
+    if "username" not in st.session_state:
+        show_login_page(); st.stop()
+
+    # ===== САЙДБАР =====
+    with st.sidebar:
+        profile = get_user_profile()
+        photo_b64 = profile.get("photo", "")
+        driver_name = profile.get("name") or st.session_state.username
+        driver_number = profile.get("number", "")
+
+        if photo_b64:
+            st.markdown(
+                f'<div style="text-align:center;padding:1rem 0;">'
+                f'<img src="data:image/jpeg;base64,{photo_b64}" '
+                f'style="width:80px;height:80px;border-radius:50%;object-fit:cover;">'
+                f'<div style="font-size:1.2rem;font-weight:bold;margin-top:8px;">{driver_name}</div>'
+                f'{"<div style=color:#64748b;font-size:.85rem;>№ " + driver_number + "</div>" if driver_number else ""}'
+                f'</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f'<div style="text-align:center;padding:1rem 0;">'
+                f'<div style="font-size:3rem;">👤</div>'
+                f'<div style="font-size:1.2rem;font-weight:bold;">{driver_name}</div>'
+                f'{"<div style=color:#64748b;font-size:.85rem;>№ " + driver_number + "</div>" if driver_number else ""}'
+                f'</div>', unsafe_allow_html=True)
+
+        try:
+            acc = get_accumulated_beznal()
+            st.metric("💳 Безнал", f"{acc:.0f} ₽")
+            db_path = get_current_db_name()
+            if os.path.exists(db_path): st.caption(f"💾 БД: {os.path.getsize(db_path)/1024:.1f} KB")
+        except: pass
+
+        st.divider()
+        page = st.session_state.get("page", "main")
+        if st.button("🏠 Главная", use_container_width=True, type="primary" if page=="main" else "secondary"):
+            st.session_state.page = "main"; st.rerun()
+        if st.button("📊 Отчёты", use_container_width=True, type="primary" if page=="reports" else "secondary"):
+            st.session_state.page = "reports"; st.rerun()
+        if st.button("🔧 Настройки", use_container_width=True, type="primary" if page=="admin" else "secondary"):
+            st.session_state.page = "admin"; st.rerun()
+        st.divider()
+        if st.button("👋 Выйти", use_container_width=True):
+            clear_session(); st.session_state.clear(); st.rerun()
+
+    page = st.session_state.get("page", "main")
+    if page == "main": show_main_page()
+    elif page == "reports": show_reports_page()
+    elif page == "admin": show_admin_page()
