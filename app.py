@@ -1826,3 +1826,4 @@ if __name__ == "__main__":
     elif page == "reports": show_reports_page()
     elif page == "stats": show_stats_page()
     elif page == "admin": show_admin_page()
+#huy
