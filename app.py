@@ -486,6 +486,10 @@ def _yadisk_user_dir(username: str) -> str:
 def _yadisk_backup_path(username: str, date_str: str) -> str:
     return f"{_yadisk_user_dir(username)}/backup_{date_str}.db"
 
+def _yadisk_temp_backup_path(username: str) -> str:
+    return f"{_yadisk_user_dir(username)}/temp_shift_backup.db"
+
+
 def _yadisk_api(method: str, url: str, token: str, data=None, params: dict = None, timeout: int = 30) -> tuple:
     if params: url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, data=data, method=method)
@@ -738,7 +742,7 @@ def check_and_offer_restore():
                " · " + str(n) + " заказ(ов) · " + str(int(s)) + " ₽ — Похоже, данные были потеряны. Восстановить?")
         st.warning(msg)
         c1, c2, c3 = st.columns(3)
-        if c1.button("✅ Восстановить (temp)", use_container_width=True, type="primary", key="rb_temp"):
+        if c1.button("✅ Восстановить (temp)", width="stretch", type="primary", key="rb_temp"):
             if restore_from_temp_backup():
                 st.session_state["restore_check_done"] = True
                 st.success("✅ Данные смены восстановлены!")
@@ -746,7 +750,7 @@ def check_and_offer_restore():
             else:
                 st.error("❌ Не удалось восстановить")
         if token:
-            if c2.button("☁️ С Яндекс Диска", use_container_width=True, key="rb_yd"):
+            if c2.button("☁️ С Яндекс Диска", width="stretch", key="rb_yd"):
                 with st.spinner("Загружаю..."):
                     try:
                         if yadisk_download_backup(token):
@@ -756,7 +760,7 @@ def check_and_offer_restore():
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
-        if c3.button("✖️ Пропустить", use_container_width=True, key="rb_skip"):
+        if c3.button("✖️ Пропустить", width="stretch", key="rb_skip"):
             st.session_state["restore_check_done"] = True
             st.rerun()
         st.stop()
@@ -770,7 +774,7 @@ def check_and_offer_restore():
                       latest["name"] + "** (" + latest["modified"] + ") — Восстановить?")
             st.warning(yd_msg)
             c1, c2 = st.columns(2)
-            if c1.button("✅ Восстановить с Яндекс Диска", use_container_width=True, type="primary", key="rb_yd2"):
+            if c1.button("✅ Восстановить с Яндекс Диска", width="stretch", type="primary", key="rb_yd2"):
                 with st.spinner("Загружаю..."):
                     try:
                         if yadisk_download_backup(token):
@@ -779,7 +783,7 @@ def check_and_offer_restore():
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
-            if c2.button("✖️ Пропустить", use_container_width=True, key="rb_skip2"):
+            if c2.button("✖️ Пропустить", width="stretch", key="rb_skip2"):
                 st.session_state["restore_check_done"] = True
                 st.rerun()
             st.stop()
@@ -798,7 +802,7 @@ def show_login_page():
     p = st.text_input("🔑 Пароль", type="password", placeholder="Введите пароль")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🚀 Войти", use_container_width=True, type="primary"):
+        if st.button("🚀 Войти", width="stretch", type="primary"):
             if authenticate_user(u, p):
                 st.session_state.username = u.strip()
                 st.session_state.page = "main"
@@ -807,7 +811,7 @@ def show_login_page():
                 st.rerun()
             else: st.error("❌ Неверный логин или пароль")
     with c2:
-        if st.button("➕ Регистрация", use_container_width=True):
+        if st.button("➕ Регистрация", width="stretch"):
             if register_user(u, p): st.success("✅ Зарегистрирован! Войдите.")
             else: st.error("❌ Логин занят или ошибка")
 
@@ -821,7 +825,7 @@ def show_main_page():
         st.info("ℹ️ Нет открытой смены")
         with st.expander("📅 Открыть смену", expanded=True):
             selected_date = st.date_input("📅 Дата", value=date.today())
-            if st.button("✅ Открыть смену", use_container_width=True, type="primary"):
+            if st.button("✅ Открыть смену", width="stretch", type="primary"):
                 open_shift(selected_date.strftime("%Y-%m-%d")); st.rerun()
         return
 
@@ -873,7 +877,7 @@ def show_main_page():
                     st.caption(f"📊 Комиссия: **{pa - pf:.0f} ₽** | На руки: **{pf + pt:.0f} ₽** | Безнал: **+{pf:.0f} ₽**")
         except: pass
 
-        if st.button("✅ Добавить заказ", use_container_width=True, type="primary", key="btn_add_order"):
+        if st.button("✅ Добавить заказ", width="stretch", type="primary", key="btn_add_order"):
             try:
                 amount = float(str(amount_str).replace(",", ".").strip())
                 tips = float(str(tips_str).replace(",", ".").strip()) if tips_str else 0.0
@@ -907,27 +911,27 @@ def show_main_page():
                     if e_type == "нал": e_comm=e_amt*(1-RATE_NAL); e_tot=e_amt+e_tips; e_bez=-e_comm
                     else: ef=e_amt*RATE_CARD; e_comm=e_amt-ef; e_tot=ef+e_tips; e_bez=ef
                     c1, c2 = st.columns(2)
-                    if c1.button("💾 Сохранить", key=f"save_{order_id}", use_container_width=True, type="primary"):
+                    if c1.button("💾 Сохранить", key=f"save_{order_id}", width="stretch", type="primary"):
                         update_order_and_adjust_beznal(order_id, e_type, e_amt, e_tips, e_comm, e_tot, e_bez)
                         st.session_state.pop(f"editing_{order_id}", None); st.cache_data.clear(); st.rerun()
-                    if c2.button("❌ Отмена", key=f"cancel_{order_id}", use_container_width=True):
+                    if c2.button("❌ Отмена", key=f"cancel_{order_id}", width="stretch"):
                         st.session_state.pop(f"editing_{order_id}", None); st.rerun()
                 continue
 
             icon = "💵" if typ == "нал" else "💳"
             st.markdown(f"{icon} **{typ}** | {tm or ''} | чек: **{am:.0f}₽** → **{tot:.0f}₽** | безнал: **{bez:+.0f}₽**")
             cols = st.columns(2)
-            if cols[0].button("✏️ Изменить", key=f"edit_{order_id}", use_container_width=True):
+            if cols[0].button("✏️ Изменить", key=f"edit_{order_id}", width="stretch"):
                 st.session_state[f"editing_{order_id}"] = True; st.rerun()
             conf_key = f"conf_{order_id}"
             if st.session_state.get(conf_key):
                 c1, c2 = cols[1].columns(2)
-                if c1.button("✅", key=f"yes_{order_id}", use_container_width=True):
+                if c1.button("✅", key=f"yes_{order_id}", width="stretch"):
                     delete_order_and_update_beznal(order_id); st.session_state.pop(conf_key, None); st.rerun()
-                if c2.button("❌", key=f"no_{order_id}", use_container_width=True):
+                if c2.button("❌", key=f"no_{order_id}", width="stretch"):
                     st.session_state.pop(conf_key, None); st.rerun()
             else:
-                if cols[1].button("🗑️ Удалить", key=f"del_{order_id}", use_container_width=True):
+                if cols[1].button("🗑️ Удалить", key=f"del_{order_id}", width="stretch"):
                     st.session_state[conf_key] = True; st.rerun()
             st.divider()
 
@@ -948,11 +952,11 @@ def show_main_page():
     col_exp, col_close = st.columns(2)
     with col_exp:
         exp_label = f"💸 Расходы  {total_extra:.0f} ₽" if total_extra > 0 else "💸 Добавить расход"
-        if st.button(exp_label, use_container_width=True, key="btn_toggle_exp"):
+        if st.button(exp_label, width="stretch", key="btn_toggle_exp"):
             st.session_state["show_expenses"] = not st.session_state.get("show_expenses", False)
             st.rerun()
     with col_close:
-        if st.button("🔒 Закрыть смену", use_container_width=True, key="btn_toggle_close", type="primary"):
+        if st.button("🔒 Закрыть смену", width="stretch", key="btn_toggle_close", type="primary"):
             st.session_state["show_close"] = not st.session_state.get("show_close", False)
             st.rerun()
 
@@ -1001,7 +1005,7 @@ def show_main_page():
             st.caption("Наведите камеру телефона на QR → скопируйте текст → вставьте сюда")
             qr_raw = st.text_area("Текст из QR", placeholder="t=20240315T1423&s=450.00&fn=...",
                                   height=70, key="qr_raw_text")
-            if st.button("🔍 Распознать текст", use_container_width=True, key="btn_parse_qr"):
+            if st.button("🔍 Распознать текст", width="stretch", key="btn_parse_qr"):
                 if qr_raw.strip():
                     parsed = parse_qr_text(qr_raw)
                     if parsed["amount"]:
@@ -1030,7 +1034,7 @@ def show_main_page():
                                    value=default_val, key=amt_widget_key)
 
         c1, c2 = st.columns(2)
-        if c1.button("➕ Добавить расход", use_container_width=True,
+        if c1.button("➕ Добавить расход", width="stretch",
                      key="btn_add_exp", type="primary"):
             if exp_amt > 0:
                 add_extra_expense(shift_id, exp_amt, exp_desc)
@@ -1041,7 +1045,7 @@ def show_main_page():
                 st.error("❌ Введите сумму больше 0")
 
         if qr_amount:
-            if c2.button("✖️ Сбросить QR", use_container_width=True, key="btn_reset_qr"):
+            if c2.button("✖️ Сбросить QR", width="stretch", key="btn_reset_qr"):
                 st.session_state.pop("qr_amount", None)
                 st.session_state.pop("qr_date", None)
                 st.rerun()
@@ -1052,9 +1056,9 @@ def show_main_page():
             for exp in expenses:
                 c1, c2 = st.columns([4, 1])
                 c1.markdown(f"**{exp['description']}** — {exp['amount']:.0f} ₽")
-                if c2.button("🗑️", key=f"del_exp_{exp['id']}", use_container_width=True):
+                if c2.button("🗑️", key=f"del_exp_{exp['id']}", width="stretch"):
                     delete_extra_expense(exp["id"]); st.rerun()
-            if st.button("✖️ Скрыть расходы", use_container_width=True, key="btn_hide_exp"):
+            if st.button("✖️ Скрыть расходы", width="stretch", key="btn_hide_exp"):
                 st.session_state["show_expenses"] = False; st.rerun()
 
     # Блок закрытия смены
@@ -1072,14 +1076,14 @@ def show_main_page():
                 st.info(f"🛢️ {liters:.1f} л × {price:.0f} ₽ = **{liters * price:.0f} ₽**")
             if not st.session_state.get("confirm_close"):
                 c1, c2 = st.columns(2)
-                if c1.button("✅ Да, закрыть смену", use_container_width=True, type="primary", key="btn_do_close"):
+                if c1.button("✅ Да, закрыть смену", width="stretch", type="primary", key="btn_do_close"):
                     st.session_state.confirm_close = True; st.rerun()
-                if c2.button("✖️ Отмена", use_container_width=True, key="btn_cancel_close"):
+                if c2.button("✖️ Отмена", width="stretch", key="btn_cancel_close"):
                     st.session_state["show_close"] = False; st.rerun()
             else:
                 st.error("⚠️ Последнее подтверждение — смена будет закрыта!")
                 c1, c2 = st.columns(2)
-                if c1.button("🔒 ЗАКРЫТЬ", use_container_width=True, type="primary", key="btn_confirm_close"):
+                if c1.button("🔒 ЗАКРЫТЬ", width="stretch", type="primary", key="btn_confirm_close"):
                     liters_val = (km / 100) * cons if km > 0 else 0.0
                     close_shift_db(shift_id, km, liters_val, price)
                     st.session_state.pop("confirm_close", None)
@@ -1100,7 +1104,7 @@ def show_main_page():
                         except Exception as e: st.warning(f"⚠️ Смена закрыта, ошибка: {e}")
                     else: st.success("✅ Смена закрыта")
                     st.rerun()
-                if c2.button("❌ Нет, не закрывать", use_container_width=True, key="btn_abort_close"):
+                if c2.button("❌ Нет, не закрывать", width="stretch", key="btn_abort_close"):
                     st.session_state.pop("confirm_close", None); st.rerun()
 
     # ===== ИТОГ =====
@@ -1115,7 +1119,7 @@ def show_main_page():
 def show_reports_page():
     st.markdown("## 📊 Отчёты")
     check_and_create_tables()
-    if st.button("🔄 Обновить", use_container_width=True): st.cache_data.clear(); st.rerun()
+    if st.button("🔄 Обновить", width="stretch"): st.cache_data.clear(); st.rerun()
     try:
         from pages_imports import (get_available_year_months_cached, get_available_days_cached,
             get_month_totals_cached, get_day_report_cached, format_month_option,
@@ -1173,7 +1177,7 @@ def show_reports_page():
                 orders_df["Комиссия ₽"] = orders_df["Комиссия ₽"].round(0).astype(int)
                 orders_df["На руки ₽"] = orders_df["На руки ₽"].round(0).astype(int)
                 orders_df["Δ Безнал ₽"] = orders_df["Δ Безнал ₽"].round(0).astype(int)
-                st.dataframe(orders_df, use_container_width=True, hide_index=True)
+                st.dataframe(orders_df, width="stretch", hide_index=True)
                 st.caption(f"Итого заказов: {len(rows)} · "
                            f"Нал: {orders_df[orders_df['Тип']=='нал']['На руки ₽'].sum()} ₽ · "
                            f"Карта: {orders_df[orders_df['Тип']=='карта']['На руки ₽'].sum()} ₽")
@@ -1185,7 +1189,7 @@ def show_reports_page():
                 exp_df = pd.DataFrame(expenses_rows, columns=["Описание", "Сумма ₽", "Время"])
                 exp_df["Время"] = exp_df["Время"].str[:16]
                 exp_df["Сумма ₽"] = exp_df["Сумма ₽"].round(0).astype(int)
-                st.dataframe(exp_df, use_container_width=True, hide_index=True)
+                st.dataframe(exp_df, width="stretch", hide_index=True)
 
             st.divider()
         st.markdown(f"### 📊 {format_month_option(selected_ym)}")
@@ -1200,7 +1204,7 @@ def show_reports_page():
         c1.metric("⛽ Бензин", f"{stats.get('бензин',0):.0f} ₽"); c2.metric("💸 Расходы", f"{stats.get('расходы',0):.0f} ₽")
         c3.metric("📈 Прибыль", f"{stats.get('прибыль',0):.0f} ₽", delta=f"{stats.get('рентабельность',0):.1f}%")
         df = get_month_shifts_details_cached(selected_ym)
-        if not df.empty: st.divider(); st.dataframe(df, use_container_width=True)
+        if not df.empty: st.divider(); st.dataframe(df, width="stretch")
     except ImportError as e: st.error(f"❌ pages_imports.py: {e}")
     except Exception as e: st.error(f"❌ Ошибка: {e}")
 
@@ -1208,7 +1212,7 @@ def show_reports_page():
 def show_stats_page():
     st.markdown("## 📈 Статистика")
     check_and_create_tables()
-    if st.button("🔄 Обновить", use_container_width=True, key="stats_refresh"):
+    if st.button("🔄 Обновить", width="stretch", key="stats_refresh"):
         st.cache_data.clear(); st.rerun()
 
     conn = get_db(); c = conn.cursor()
@@ -1341,30 +1345,90 @@ def show_stats_page():
         df_dow = pd.DataFrame(dow_rows, columns=["dow","заказов","средний_чек","сумма"])
         df_dow["день"] = df_dow["dow"].apply(lambda x: dow_names.get(str(x), str(x)))
         df_dow["средний_чек"] = df_dow["средний_чек"].round(0).astype(int)
+        df_dow["сумма"] = df_dow["сумма"].round(0).astype(int)
+
+        # Прогноз на ближайшие 3 дня на основе исторических данных по дням недели
+        today_dow = datetime.now(MOSCOW_TZ).weekday()  # 0=Пн
+        # weekday() пн=0..вс=6 → sqlite strftime %w вс=0,пн=1..сб=6
+        dow_map = {0: "1", 1: "2", 2: "3", 3: "4", 4: "5", 5: "6", 6: "0"}
+        # df_dow["dow"] — строки из SQLite ("0".."6"), нормализуем ключи к строкам
+        orders_by_dow = {str(k): v for k, v in zip(df_dow["dow"].tolist(), df_dow["заказов"].tolist())}
+        check_by_dow  = {str(k): v for k, v in zip(df_dow["dow"].tolist(), df_dow["средний_чек"].tolist())}
+        forecast_dow = []
+        for d in range(3):
+            wd = (today_dow + d) % 7
+            sq = dow_map[wd]  # строка "0".."6" как в SQLite
+            pred_orders = orders_by_dow.get(sq, 0)
+            pred_check  = check_by_dow.get(sq, 0)
+            label = "Сегодня" if d == 0 else ("Завтра" if d == 1 else "Послезавтра")
+            dn = dow_names.get(sq, sq)
+            forecast_dow.append({
+                "День": f"{label} ({dn})",
+                "Ожид. заказов": pred_orders,
+                "Ожид. средний чек ₽": pred_check,
+                "Ожид. доход ₽": int(pred_orders * pred_check)
+            })
+
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("**Кол-во заказов**")
-            st.bar_chart(df_dow.set_index("день")["заказов"])
+            st.markdown("**📊 История по дням**")
+            st.dataframe(
+                df_dow[["день", "заказов", "средний_чек", "сумма"]].rename(columns={
+                    "день": "День",
+                    "заказов": "Заказов",
+                    "средний_чек": "Средний чек ₽",
+                    "сумма": "Сумма ₽"
+                }),
+                width="stretch",
+                hide_index=True
+            )
         with col2:
-            st.markdown("**Средний чек, ₽**")
-            st.bar_chart(df_dow.set_index("день")["средний_чек"])
+            st.markdown("**🔮 Прогноз на 3 дня**")
+            st.dataframe(pd.DataFrame(forecast_dow), width="stretch", hide_index=True)
 
     st.divider()
     st.markdown("### ⏰ Активность по часам")
     if hour_rows:
         df_h = pd.DataFrame(hour_rows, columns=["час","заказов","средний_чек"])
-        full = pd.DataFrame({"час": list(range(24))})
-        df_h = full.merge(df_h, on="час", how="left").fillna(0)
+        # убираем нулевые часы — только активные
+        df_h = df_h[df_h["заказов"] > 0].copy()
         df_h["заказов"] = df_h["заказов"].astype(int)
         df_h["средний_чек"] = df_h["средний_чек"].round(0).astype(int)
         df_h["час_str"] = df_h["час"].apply(lambda h: f"{int(h):02d}:00")
+
+        # Прогноз по всем активным часам:
+        # для каждого активного часа — взвешенное среднее с соседями (±1 час)
+        hour_map = dict(zip(df_h["час"].tolist(), df_h["заказов"].tolist()))
+        check_map = dict(zip(df_h["час"].tolist(), df_h["средний_чек"].tolist()))
+        forecast_rows = []
+        for fh in sorted(hour_map.keys()):
+            neighbors = [hour_map.get(fh - 1, 0), hour_map.get(fh, 0), hour_map.get(fh + 1, 0)]
+            pred_orders = round(sum(n * w for n, w in zip(neighbors, [0.25, 0.5, 0.25])), 1)
+            pred_check = check_map.get(fh, 0)
+            pred_income = round(pred_orders * pred_check)
+            forecast_rows.append({
+                "Час": f"{fh:02d}:00",
+                "Ист. заказов": hour_map[fh],
+                "Прогноз заказов": pred_orders,
+                "Ожид. чек ₽": pred_check,
+                "Ожид. доход ₽": pred_income
+            })
+
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("**Кол-во заказов**")
-            st.bar_chart(df_h.set_index("час_str")["заказов"])
+            st.markdown("**📊 История по активным часам**")
+            st.dataframe(
+                df_h[["час_str", "заказов", "средний_чек"]].rename(columns={
+                    "час_str": "Час",
+                    "заказов": "Заказов",
+                    "средний_чек": "Средний чек ₽"
+                }),
+                width="stretch",
+                hide_index=True
+            )
         with col2:
-            st.markdown("**Средний чек, ₽**")
-            st.bar_chart(df_h.set_index("час_str")["средний_чек"])
+            st.markdown("**🔮 Прогноз по часам работы**")
+            st.dataframe(pd.DataFrame(forecast_rows), width="stretch", hide_index=True)
 
     st.divider()
     st.markdown("### 📆 Тренд по месяцам")
@@ -1374,16 +1438,20 @@ def show_stats_page():
         df_m["доход"] = df_m["доход"].round(0).astype(int)
         df_m["топливо"] = df_m["топливо"].round(0).astype(int)
         df_m = df_m.sort_values("месяц")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Доход и прибыль, ₽**")
-            st.line_chart(df_m.set_index("месяц")[["доход","прибыль"]])
-        with col2:
-            st.markdown("**Заказов по месяцам**")
-            st.bar_chart(df_m.set_index("месяц")["заказов"])
         st.markdown("**Детали по месяцам**")
         df_show = df_m[["месяц","смен","заказов","доход","топливо","прибыль"]].sort_values("месяц", ascending=False)
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_show.rename(columns={
+                "месяц": "Месяц",
+                "смен": "Смен",
+                "заказов": "Заказов",
+                "доход": "Доход ₽",
+                "топливо": "Топливо ₽",
+                "прибыль": "Прибыль ₽"
+            }),
+            width="stretch",
+            hide_index=True
+        )
 
 # ===== UI: НАСТРОЙКИ =====
 def show_admin_page():
@@ -1411,7 +1479,7 @@ def show_admin_page():
             st.success(f"✅ Подключён · `jet/{current_user}/backup_<дата>.db`")
             with st.expander("🔑 Изменить токен", expanded=False):
                 new_tok = st.text_input("OAuth-токен", value=tok, type="password", key="input_yd_token")
-                if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
+                if st.button("💾 Сохранить токен", width="stretch", key="save_tok"):
                     st.session_state.yadisk_token = new_tok.strip(); st.rerun()
         else:
             if tok: st.error("❌ Токен не работает")
@@ -1428,12 +1496,12 @@ YADISK_TOKEN = "y0_AgAAAA..."
 ```""")
             new_tok = st.text_input("🔑 OAuth-токен", value=tok, type="password",
                                      placeholder="y0_AgAAAA...", key="input_yd_token")
-            if st.button("💾 Сохранить токен", use_container_width=True, key="save_tok"):
+            if st.button("💾 Сохранить токен", width="stretch", key="save_tok"):
                 st.session_state.yadisk_token = new_tok.strip(); st.rerun()
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("📤 Загрузить сейчас", use_container_width=True, type="primary"):
+            if st.button("📤 Загрузить сейчас", width="stretch", type="primary"):
                 with st.spinner("Загружаю..."):
                     ds = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
                     if yadisk_upload_backup(tok, shift_date=ds):
@@ -1444,7 +1512,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                         st.success(msg)
                         st.rerun()
         with c2:
-            if st.button("📥 Восстановить последний", use_container_width=True):
+            if st.button("📥 Восстановить последний", width="stretch"):
                 with st.spinner("Скачиваю..."):
                     try:
                         if yadisk_download_backup(tok): st.success("✅ Восстановлено!"); st.rerun()
@@ -1464,7 +1532,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                     info_parts.append(f"можно удалить старых: **{old_b}**")
                 st.caption(" · ".join(info_parts))
                 if old_b > 0:
-                    if st.button(f"🗑️ Очистить старые (оставить 3 последних)", use_container_width=True, key="yd_cleanup_btn"):
+                    if st.button(f"🗑️ Очистить старые (оставить 3 последних)", width="stretch", key="yd_cleanup_btn"):
                         with st.spinner("Удаляю старые бэкапы..."):
                             cleaned = yadisk_cleanup_old_backups(tok, keep=3, min_age_days=0)
                             if cleaned > 0:
@@ -1476,13 +1544,13 @@ YADISK_TOKEN = "y0_AgAAAA..."
                 for b in yd_backups:
                     c1, c2, c3 = st.columns([3, 1, 1])
                     c1.markdown(f"📄 **{b['name']}**  \n📅 {b['modified']} · {b['size_kb']} KB")
-                    if c2.button("📥", key=f"yd_dl_{b['name']}", use_container_width=True, help="Восстановить"):
+                    if c2.button("📥", key=f"yd_dl_{b['name']}", width="stretch", help="Восстановить"):
                         with st.spinner("Восстанавливаю..."):
                             try:
                                 if yadisk_download_backup(tok, remote_path=b["path"]):
                                     st.success(f"✅ {b['name']}"); st.rerun()
                             except Exception as e: st.error(f"❌ {e}")
-                    if c3.button("🗑️", key=f"yd_del_{b['name']}", use_container_width=True, help="Удалить"):
+                    if c3.button("🗑️", key=f"yd_del_{b['name']}", width="stretch", help="Удалить"):
                         if yadisk_delete_backup(tok, b["path"]): st.success("✅ Удалён"); st.rerun()
                         else: st.error("❌ Не удалось удалить")
             else:
@@ -1492,24 +1560,24 @@ YADISK_TOKEN = "y0_AgAAAA..."
 
         st.divider()
         st.markdown("#### 📦 Локальные бэкапы")
-        if st.button("📦 Создать локальный бэкап", use_container_width=True):
+        if st.button("📦 Создать локальный бэкап", width="stretch"):
             path = create_backup(); st.success(f"✅ {os.path.basename(path)}")
 
         uploaded = st.file_uploader("📁 Восстановить из .db файла", type=["db"], key="restore_uploader")
         if uploaded:
             if not st.session_state.get("confirm_restore"):
-                if st.button("📥 Восстановить из файла", use_container_width=True, type="primary"):
+                if st.button("📥 Восстановить из файла", width="stretch", type="primary"):
                     st.session_state.confirm_restore = True; st.rerun()
             else:
                 st.warning("⚠️ Текущая БД будет заменена (автобэкап создастся)")
                 c1, c2 = st.columns(2)
-                if c1.button("✅ Да", use_container_width=True, type="primary"):
+                if c1.button("✅ Да", width="stretch", type="primary"):
                     try:
                         upload_and_restore_backup(uploaded)
                         st.session_state.pop("confirm_restore", None)
                         st.success("✅ Восстановлено!"); time.sleep(1); st.rerun()
                     except Exception as e: st.error(f"❌ {e}")
-                if c2.button("❌ Отмена", use_container_width=True):
+                if c2.button("❌ Отмена", width="stretch"):
                     st.session_state.pop("confirm_restore", None); st.rerun()
 
         for b in list_backups():
@@ -1517,10 +1585,10 @@ YADISK_TOKEN = "y0_AgAAAA..."
                 st.caption(f"📅 {b['time'].strftime('%d.%m.%Y %H:%M')} — {b['size']:.1f} KB")
                 c1, c2, c3 = st.columns(3)
                 with open(b["path"], "rb") as f:
-                    c1.download_button("⬇️ Скачать", f.read(), b["name"], key=f"dl_{b['name']}", use_container_width=True)
-                if c2.button("📥 Откат", key=f"rb_{b['name']}", use_container_width=True):
+                    c1.download_button("⬇️ Скачать", f.read(), b["name"], key=f"dl_{b['name']}", width="stretch")
+                if c2.button("📥 Откат", key=f"rb_{b['name']}", width="stretch"):
                     restore_from_backup(b["path"]); st.success("✅ Восстановлено!"); st.rerun()
-                if c3.button("🗑️", key=f"xb_{b['name']}", use_container_width=True):
+                if c3.button("🗑️", key=f"xb_{b['name']}", width="stretch"):
                     os.remove(b["path"]); st.rerun()
 
     # ===== TAB 2: БЕЗНАЛ =====
@@ -1536,7 +1604,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
         with c2: pay_date = st.date_input("Дата", value=date.today(), key="pay_date")
         pay_note = st.text_input("Комментарий", placeholder="за неделю", key="pay_note")
         if pay_amount > cur: st.warning(f"⚠️ Сумма ({pay_amount:.0f}₽) > остатка ({cur:.0f}₽)")
-        if st.button("💸 Зафиксировать выплату", use_container_width=True, type="primary", key="btn_pay"):
+        if st.button("💸 Зафиксировать выплату", width="stretch", type="primary", key="btn_pay"):
             if pay_amount <= 0: st.error("❌ Введите сумму > 0")
             else:
                 try:
@@ -1552,13 +1620,13 @@ YADISK_TOKEN = "y0_AgAAAA..."
                 c1, c2, c3 = st.columns([2, 3, 1])
                 c1.markdown(f"**{p['amount']:.0f} ₽**")
                 c2.markdown(f"📅 {p['date']}" + (f" · {p['note']}" if p['note'] else ""))
-                if c3.button("🗑️", key=f"del_pay_{p['id']}", use_container_width=True):
+                if c3.button("🗑️", key=f"del_pay_{p['id']}", width="stretch"):
                     try: delete_beznal_payment(p["id"]); st.rerun()
                     except Exception as e: st.error(f"❌ {e}")
         st.divider()
         with st.expander("⚙️ Ручная корректировка остатка"):
             nv = st.number_input("Установить остаток (₽)", value=float(cur), key="new_beznal")
-            if st.button("💾 Установить", use_container_width=True):
+            if st.button("💾 Установить", width="stretch"):
                 set_accumulated_beznal(nv); st.success(f"✅ {nv:.0f} ₽"); st.rerun()
 
     # ===== TAB 3: ПРОФИЛЬ =====
@@ -1587,7 +1655,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
             st.caption("👆 Предпросмотр")
 
         if photo_b64:
-            if st.button("🗑️ Удалить фото", use_container_width=True):
+            if st.button("🗑️ Удалить фото", width="stretch"):
                 delete_user_photo(); st.rerun()
 
         st.divider()
@@ -1611,7 +1679,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
         old_pwd = st.text_input("Текущий пароль", type="password", key="old_pwd")
         new_pwd1 = st.text_input("Новый пароль", type="password", key="new_pwd1")
         new_pwd2 = st.text_input("Повторите новый пароль", type="password", key="new_pwd2")
-        if st.button("💾 Сменить пароль", use_container_width=True, key="btn_change_pwd"):
+        if st.button("💾 Сменить пароль", width="stretch", key="btn_change_pwd"):
             if not authenticate_user(current_user, old_pwd):
                 st.error("❌ Текущий пароль неверный")
             elif new_pwd1 != new_pwd2:
@@ -1624,7 +1692,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                 else:
                     st.error("❌ Ошибка при смене пароля")
 
-        if st.button("💾 Сохранить профиль", use_container_width=True, type="primary"):
+        if st.button("💾 Сохранить профиль", width="stretch", type="primary"):
             save_to_use = new_photo_b64 if new_photo_b64 else photo_b64
             save_user_profile(p_name.strip(), p_number.strip(), save_to_use, p_font)
             st.success("✅ Профиль сохранён!"); st.rerun()
@@ -1634,7 +1702,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
         st.markdown("### ⚠️ Опасная зона")
         st.error("Удаление всех данных — необратимо!")
         confirm_text = st.text_input("Введите СБРОС для подтверждения", placeholder="СБРОС")
-        if st.button("⚠️ СБРОСИТЬ БАЗУ", use_container_width=True, type="primary"):
+        if st.button("⚠️ СБРОСИТЬ БАЗУ", width="stretch", type="primary"):
             if confirm_text == "СБРОС":
                 try:
                     from pages_imports import reset_db
@@ -1682,7 +1750,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                                              key=f"master_name_{selected_u}")
                     new_number = st.text_input("Позывной", value=u_profile.get("number", ""),
                                                key=f"master_number_{selected_u}")
-                    if st.button("💾 Сохранить имя", use_container_width=True,
+                    if st.button("💾 Сохранить имя", width="stretch",
                                  key=f"master_save_name_{selected_u}", type="primary"):
                         try:
                             st.session_state["username"] = selected_u
@@ -1702,7 +1770,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
                                             placeholder="Минимум 4 символа")
                     new_pwd2 = st.text_input("Повторить пароль", type="password",
                                              key=f"master_pwd2_{selected_u}")
-                    if st.button("🔑 Сменить пароль", use_container_width=True,
+                    if st.button("🔑 Сменить пароль", width="stretch",
                                  key=f"master_chpwd_{selected_u}", type="primary"):
                         if not new_pwd:
                             st.warning("⚠️ Введите новый пароль")
@@ -1719,17 +1787,17 @@ YADISK_TOKEN = "y0_AgAAAA..."
                     st.divider()
                     if not st.session_state.get(f"confirm_del_{selected_u}"):
                         if st.button(f"🗑️ Удалить пользователя {selected_u}",
-                                     use_container_width=True, key=f"master_del_{selected_u}"):
+                                     width="stretch", key=f"master_del_{selected_u}"):
                             st.session_state[f"confirm_del_{selected_u}"] = True; st.rerun()
                     else:
                         st.error(f"⚠️ Удалить {selected_u}? Это необратимо!")
                         c1, c2 = st.columns(2)
-                        if c1.button("✅ Да, удалить", use_container_width=True,
+                        if c1.button("✅ Да, удалить", width="stretch",
                                      key=f"master_confirm_del_{selected_u}", type="primary"):
                             delete_user(selected_u)
                             st.session_state.pop(f"confirm_del_{selected_u}", None)
                             st.success(f"✅ {selected_u} удалён"); st.rerun()
-                        if c2.button("❌ Отмена", use_container_width=True,
+                        if c2.button("❌ Отмена", width="stretch",
                                      key=f"master_cancel_del_{selected_u}"):
                             st.session_state.pop(f"confirm_del_{selected_u}", None); st.rerun()
 
@@ -1738,7 +1806,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
             c1, c2 = st.columns(2)
             with c1: new_u = st.text_input("👤 Логин", key="master_new_login")
             with c2: new_p = st.text_input("🔑 Пароль", type="password", key="master_new_pwd")
-            if st.button("➕ Создать пользователя", use_container_width=True):
+            if st.button("➕ Создать пользователя", width="stretch"):
                 if register_user(new_u, new_p): st.success(f"✅ {new_u} создан"); st.rerun()
                 else: st.error("❌ Логин занят или ошибка")
 
@@ -1746,7 +1814,7 @@ YADISK_TOKEN = "y0_AgAAAA..."
         st.divider()
         with st.expander("👑 Вход для мастер-администратора", expanded=False):
             master_input = st.text_input("Мастер-пароль", type="password", key="master_pwd_input")
-            if st.button("🔐 Войти как мастер-админ", use_container_width=True):
+            if st.button("🔐 Войти как мастер-админ", width="stretch"):
                 if master_input == master_pwd:
                     st.session_state.master_admin_auth = True
                     st.success("✅ Добро пожаловать, мастер-админ!")
@@ -1809,16 +1877,16 @@ if __name__ == "__main__":
 
         st.divider()
         page = st.session_state.get("page", "main")
-        if st.button("🏠 Главная", use_container_width=True, type="primary" if page=="main" else "secondary"):
+        if st.button("🏠 Главная", width="stretch", type="primary" if page=="main" else "secondary"):
             st.session_state.page = "main"; st.rerun()
-        if st.button("📊 Отчёты", use_container_width=True, type="primary" if page=="reports" else "secondary"):
+        if st.button("📊 Отчёты", width="stretch", type="primary" if page=="reports" else "secondary"):
             st.session_state.page = "reports"; st.rerun()
-        if st.button("📈 Статистика", use_container_width=True, type="primary" if page=="stats" else "secondary"):
+        if st.button("📈 Статистика", width="stretch", type="primary" if page=="stats" else "secondary"):
             st.session_state.page = "stats"; st.rerun()
-        if st.button("🔧 Настройки", use_container_width=True, type="primary" if page=="admin" else "secondary"):
+        if st.button("🔧 Настройки", width="stretch", type="primary" if page=="admin" else "secondary"):
             st.session_state.page = "admin"; st.rerun()
         st.divider()
-        if st.button("👋 Выйти", use_container_width=True):
+        if st.button("👋 Выйти", width="stretch"):
             clear_session(); st.session_state.clear(); st.rerun()
 
     page = st.session_state.get("page", "main")
