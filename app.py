@@ -114,6 +114,74 @@ def get_backup_dir() -> str:
     path = os.path.join(get_user_dir(st.session_state.get("username", "unknown")), "backups")
     os.makedirs(path, exist_ok=True); return path
 
+def get_temp_backup_path() -> str:
+    u = st.session_state.get("username", "unknown")
+    return os.path.join(get_user_dir(u), "temp_shift_backup.db")
+
+def create_temp_backup():
+    try:
+        src = get_current_db_name()
+        dst = get_temp_backup_path()
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+    except Exception:
+        pass
+
+def delete_temp_backup():
+    try:
+        p = get_temp_backup_path()
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
+
+def get_temp_backup_info():
+    p = get_temp_backup_path()
+    if not os.path.exists(p):
+        return None
+    try:
+        conn = sqlite3.connect(p); c = conn.cursor()
+        c.execute("SELECT id, date FROM shifts WHERE is_open=1 LIMIT 1")
+        row = c.fetchone()
+        if not row:
+            c.execute("SELECT id, date FROM shifts ORDER BY id DESC LIMIT 1")
+            row = c.fetchone()
+        if row:
+            shift_id, shift_date = row
+            c.execute("SELECT COUNT(*), COALESCE(SUM(total),0) FROM orders WHERE shift_id=?", (shift_id,))
+            cnt, total = c.fetchone()
+            conn.close()
+            return {"date": shift_date or "?", "orders": int(cnt or 0), "total": float(total or 0)}
+        conn.close()
+        return None
+    except Exception:
+        return None
+
+def restore_from_temp_backup() -> bool:
+    p = get_temp_backup_path()
+    if not os.path.exists(p):
+        return False
+    try:
+        dst = get_current_db_name()
+        if os.path.exists(dst):
+            shutil.copy2(dst, dst + ".pre_restore")
+        shutil.copy2(p, dst)
+        st.cache_data.clear()
+        return True
+    except Exception:
+        return False
+
+def check_db_has_data() -> bool:
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("""SELECT COUNT(*) FROM shifts WHERE is_open=0
+                     AND EXISTS (SELECT 1 FROM orders o WHERE o.shift_id=shifts.id)""")
+        cnt = c.fetchone()[0] or 0
+        conn.close()
+        return cnt > 0
+    except Exception:
+        return False
+
 # ===== БД =====
 def check_and_create_tables():
     try:
@@ -594,13 +662,21 @@ def decode_qr_image(image_bytes: bytes) -> str:
         pass
     return ""
 
-def render_profile_header():
+def render_profile_header(shift_id=None):
     profile = get_user_profile()
     acc = get_accumulated_beznal()
     font_size = profile.get("font_size", 28)
     driver_name = profile.get("name") or st.session_state.get("username", "")
     driver_number = profile.get("number", "")
     photo_b64 = profile.get("photo", "")
+
+    # Считаем заказы текущей смены если она открыта
+    order_count = None
+    if shift_id is not None:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM orders WHERE shift_id=?", (shift_id,))
+        order_count = c.fetchone()[0] or 0
+        conn.close()
 
     col_photo, col_info, col_beznal = st.columns([1, 3, 2])
     with col_photo:
@@ -629,7 +705,86 @@ def render_profile_header():
             f"</div>",
             unsafe_allow_html=True)
     with col_beznal:
-        st.metric("💳 Безнал", f"{acc:.0f} ₽")
+        if order_count is not None:
+            c1, c2 = st.columns(2)
+            c1.metric("💳 Безнал", f"{acc:.0f} ₽")
+            c2.metric("📦 Заказов", order_count)
+        else:
+            st.metric("💳 Безнал", f"{acc:.0f} ₽")
+
+# ===== ПРОВЕРКА ВОССТАНОВЛЕНИЯ ПРИ СТАРТЕ =====
+def check_and_offer_restore():
+    """Один раз после логина — предлагает восстановить если БД пуста."""
+    if st.session_state.get("restore_check_done"):
+        return
+
+    has_data = check_db_has_data()
+    if has_data:
+        st.session_state["restore_check_done"] = True
+        return
+
+    temp_info = get_temp_backup_info()
+    token = get_yadisk_token()
+
+    if not temp_info and not token:
+        st.session_state["restore_check_done"] = True
+        return
+
+    if temp_info:
+        d = temp_info["date"]
+        n = temp_info["orders"]
+        s = temp_info["total"]
+        msg = ("⚠️ **Обнаружен бэкап незавершённой смены** от " + str(d) +
+               " · " + str(n) + " заказ(ов) · " + str(int(s)) + " ₽ — Похоже, данные были потеряны. Восстановить?")
+        st.warning(msg)
+        c1, c2, c3 = st.columns(3)
+        if c1.button("✅ Восстановить (temp)", use_container_width=True, type="primary", key="rb_temp"):
+            if restore_from_temp_backup():
+                st.session_state["restore_check_done"] = True
+                st.success("✅ Данные смены восстановлены!")
+                st.rerun()
+            else:
+                st.error("❌ Не удалось восстановить")
+        if token:
+            if c2.button("☁️ С Яндекс Диска", use_container_width=True, key="rb_yd"):
+                with st.spinner("Загружаю..."):
+                    try:
+                        if yadisk_download_backup(token):
+                            delete_temp_backup()
+                            st.session_state["restore_check_done"] = True
+                            st.success("✅ Восстановлено с Яндекс Диска!")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+        if c3.button("✖️ Пропустить", use_container_width=True, key="rb_skip"):
+            st.session_state["restore_check_done"] = True
+            st.rerun()
+        st.stop()
+
+    elif token:
+        yd_backups = yadisk_list_backups(token)
+        if yd_backups:
+            latest = yd_backups[0]
+            latest = yd_backups[0]
+            yd_msg = ("⚠️ **База данных пуста.** Найден бэкап на Яндекс Диске: **" +
+                      latest["name"] + "** (" + latest["modified"] + ") — Восстановить?")
+            st.warning(yd_msg)
+            c1, c2 = st.columns(2)
+            if c1.button("✅ Восстановить с Яндекс Диска", use_container_width=True, type="primary", key="rb_yd2"):
+                with st.spinner("Загружаю..."):
+                    try:
+                        if yadisk_download_backup(token):
+                            st.session_state["restore_check_done"] = True
+                            st.success("✅ Восстановлено!")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+            if c2.button("✖️ Пропустить", use_container_width=True, key="rb_skip2"):
+                st.session_state["restore_check_done"] = True
+                st.rerun()
+            st.stop()
+        else:
+            st.session_state["restore_check_done"] = True
 
 # ===== UI: ВХОД =====
 def show_login_page():
@@ -659,10 +814,10 @@ def show_login_page():
 # ===== UI: ГЛАВНАЯ =====
 def show_main_page():
     check_and_create_tables()
-    render_profile_header()
     open_shift_data = get_open_shift()
 
     if not open_shift_data:
+        render_profile_header()  # без счётчика — смены нет
         st.info("ℹ️ Нет открытой смены")
         with st.expander("📅 Открыть смену", expanded=True):
             selected_date = st.date_input("📅 Дата", value=date.today())
@@ -671,6 +826,7 @@ def show_main_page():
         return
 
     shift_id, date_str = open_shift_data
+    render_profile_header(shift_id=shift_id)  # со счётчиком заказов
 
     # ===== ПРОВЕРКА ДЛИТЕЛЬНОСТИ СМЕНЫ =====
     conn_check = get_db()
@@ -729,6 +885,7 @@ def show_main_page():
                     else:
                         final = amount * RATE_CARD; commission = amount - final; total = final + tips; beznal_added = final; db_type = "карта"
                     add_order_and_update_beznal(shift_id, db_type, amount, tips, commission, total, beznal_added, order_time)
+                    create_temp_backup()
                     st.session_state["reset_order_fields"] = True
                     st.rerun()
             except (ValueError, AttributeError):
@@ -928,6 +1085,7 @@ def show_main_page():
                     st.session_state.pop("confirm_close", None)
                     st.session_state["show_close"] = False
                     st.cache_data.clear()
+                    delete_temp_backup()  # удаляем temp после закрытия смены
                     token = get_yadisk_token()
                     if token:
                         try:
@@ -1045,6 +1203,187 @@ def show_reports_page():
         if not df.empty: st.divider(); st.dataframe(df, use_container_width=True)
     except ImportError as e: st.error(f"❌ pages_imports.py: {e}")
     except Exception as e: st.error(f"❌ Ошибка: {e}")
+
+# ===== UI: СТАТИСТИКА =====
+def show_stats_page():
+    st.markdown("## 📈 Статистика")
+    check_and_create_tables()
+    if st.button("🔄 Обновить", use_container_width=True, key="stats_refresh"):
+        st.cache_data.clear(); st.rerun()
+
+    conn = get_db(); c = conn.cursor()
+
+    c.execute("""
+        SELECT
+            COUNT(DISTINCT s.id),
+            COUNT(o.id),
+            COALESCE(SUM(o.total), 0),
+            COALESCE(SUM(CASE WHEN o.type='нал' THEN o.total-o.tips ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN o.type='карта' THEN o.total-o.tips ELSE 0 END), 0),
+            COALESCE(SUM(o.tips), 0),
+            COALESCE(AVG(o.total), 0),
+            COALESCE(MAX(o.total), 0)
+        FROM orders o
+        JOIN shifts s ON o.shift_id = s.id
+        WHERE s.is_open = 0
+    """)
+    row = c.fetchone()
+    if not row or row[0] == 0:
+        conn.close()
+        st.info("📭 Нет данных для статистики. Закройте хотя бы одну смену.")
+        return
+
+    total_shifts, total_orders, total_income, total_nal, total_card, total_tips, avg_check, max_check = row
+
+    c.execute("SELECT COALESCE(SUM(fuel_liters*fuel_price),0), COALESCE(SUM(km),0) FROM shifts WHERE is_open=0 AND fuel_price>0")
+    fuel_cost, total_km = c.fetchone()
+    fuel_cost = float(fuel_cost or 0); total_km = int(total_km or 0)
+
+    c.execute("SELECT COALESCE(SUM(e.amount),0) FROM extra_expenses e JOIN shifts s ON e.shift_id=s.id WHERE s.is_open=0")
+    extra_cost = float(c.fetchone()[0] or 0.0)
+    total_profit = total_income - fuel_cost - extra_cost
+
+    # Рекорды
+    c.execute("""
+        SELECT s.date, COUNT(o.id), COALESCE(SUM(o.total),0),
+               COALESCE(s.fuel_liters*s.fuel_price,0)
+        FROM shifts s
+        LEFT JOIN orders o ON o.shift_id=s.id
+        WHERE s.is_open=0
+        GROUP BY s.id ORDER BY SUM(o.total) DESC LIMIT 1
+    """)
+    best_income_row = c.fetchone()
+
+    c.execute("""
+        SELECT s.date, COUNT(o.id) as cnt
+        FROM shifts s JOIN orders o ON o.shift_id=s.id
+        WHERE s.is_open=0
+        GROUP BY s.id ORDER BY cnt DESC LIMIT 1
+    """)
+    most_orders_row = c.fetchone()
+
+    c.execute("""
+        SELECT o.total, o.type, o.order_time, s.date
+        FROM orders o JOIN shifts s ON o.shift_id=s.id
+        WHERE s.is_open=0 ORDER BY o.total DESC LIMIT 1
+    """)
+    max_order_row = c.fetchone()
+
+    # По дням недели
+    c.execute("""
+        SELECT strftime('%w', s.date) as dow,
+               COUNT(o.id), COALESCE(AVG(o.total),0), COALESCE(SUM(o.total),0)
+        FROM orders o JOIN shifts s ON o.shift_id=s.id
+        WHERE s.is_open=0 AND s.date IS NOT NULL
+        GROUP BY dow ORDER BY CAST(dow AS INTEGER)
+    """)
+    dow_rows = c.fetchall()
+
+    # По часам
+    c.execute("""
+        SELECT CAST(substr(o.order_time,1,2) AS INTEGER) as hr,
+               COUNT(*), COALESCE(AVG(o.total),0)
+        FROM orders o JOIN shifts s ON o.shift_id=s.id
+        WHERE s.is_open=0 AND o.order_time IS NOT NULL AND length(o.order_time)>=2
+        GROUP BY hr ORDER BY hr
+    """)
+    hour_rows = c.fetchall()
+
+    # Тренд по месяцам
+    c.execute("""
+        SELECT strftime('%Y-%m', s.date) as ym,
+               COUNT(DISTINCT s.id), COUNT(o.id),
+               COALESCE(SUM(o.total),0),
+               COALESCE(SUM(s.fuel_liters*s.fuel_price),0)
+        FROM orders o JOIN shifts s ON o.shift_id=s.id
+        WHERE s.is_open=0
+        GROUP BY ym ORDER BY ym DESC LIMIT 12
+    """)
+    month_rows = c.fetchall()
+    conn.close()
+
+    # ===== ВЫВОД =====
+    st.markdown("### 🏆 Итого за всё время")
+    col1,col2,col3,col4 = st.columns(4)
+    col1.metric("🚕 Смен", total_shifts)
+    col2.metric("📦 Заказов", total_orders)
+    col3.metric("💰 Доход", f"{total_income:.0f} ₽")
+    col4.metric("📈 Прибыль", f"{total_profit:.0f} ₽")
+
+    col1,col2,col3,col4 = st.columns(4)
+    col1.metric("💵 Нал", f"{total_nal:.0f} ₽")
+    col2.metric("💳 Карта", f"{total_card:.0f} ₽")
+    col3.metric("💝 Чаевые", f"{total_tips:.0f} ₽")
+    col4.metric("⛽ Топливо", f"{fuel_cost:.0f} ₽")
+
+    col1,col2,col3,col4 = st.columns(4)
+    col1.metric("📊 Средний чек", f"{avg_check:.0f} ₽")
+    col2.metric("💸 Доп. расходы", f"{extra_cost:.0f} ₽")
+    col3.metric("🛣️ Км пробега", f"{total_km:,}".replace(",", " "))
+    avg_per_shift = total_income / total_shifts if total_shifts > 0 else 0
+    col4.metric("💵 Доход/смена", f"{avg_per_shift:.0f} ₽")
+
+    st.divider()
+    st.markdown("### 🥇 Рекорды")
+    col1, col2, col3 = st.columns(3)
+    if best_income_row:
+        col1.metric("🏆 Лучшая смена (доход)", f"{best_income_row[2]:.0f} ₽", delta=str(best_income_row[0]))
+    if most_orders_row:
+        col2.metric("📦 Макс. заказов за смену", str(most_orders_row[1]), delta=str(most_orders_row[0]))
+    if max_order_row:
+        lbl = str(max_order_row[1]) + " " + str(max_order_row[2] or "") + " " + str(max_order_row[3] or "")
+        col3.metric("💎 Макс. заказ", f"{max_order_row[0]:.0f} ₽", delta=lbl.strip())
+
+    st.divider()
+    st.markdown("### 📅 По дням недели")
+    if dow_rows:
+        dow_names = {"0":"Вс","1":"Пн","2":"Вт","3":"Ср","4":"Чт","5":"Пт","6":"Сб"}
+        df_dow = pd.DataFrame(dow_rows, columns=["dow","заказов","средний_чек","сумма"])
+        df_dow["день"] = df_dow["dow"].apply(lambda x: dow_names.get(str(x), str(x)))
+        df_dow["средний_чек"] = df_dow["средний_чек"].round(0).astype(int)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Кол-во заказов**")
+            st.bar_chart(df_dow.set_index("день")["заказов"])
+        with col2:
+            st.markdown("**Средний чек, ₽**")
+            st.bar_chart(df_dow.set_index("день")["средний_чек"])
+
+    st.divider()
+    st.markdown("### ⏰ Активность по часам")
+    if hour_rows:
+        df_h = pd.DataFrame(hour_rows, columns=["час","заказов","средний_чек"])
+        full = pd.DataFrame({"час": list(range(24))})
+        df_h = full.merge(df_h, on="час", how="left").fillna(0)
+        df_h["заказов"] = df_h["заказов"].astype(int)
+        df_h["средний_чек"] = df_h["средний_чек"].round(0).astype(int)
+        df_h["час_str"] = df_h["час"].apply(lambda h: f"{int(h):02d}:00")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Кол-во заказов**")
+            st.bar_chart(df_h.set_index("час_str")["заказов"])
+        with col2:
+            st.markdown("**Средний чек, ₽**")
+            st.bar_chart(df_h.set_index("час_str")["средний_чек"])
+
+    st.divider()
+    st.markdown("### 📆 Тренд по месяцам")
+    if month_rows:
+        df_m = pd.DataFrame(month_rows, columns=["месяц","смен","заказов","доход","топливо"])
+        df_m["прибыль"] = (df_m["доход"] - df_m["топливо"]).round(0).astype(int)
+        df_m["доход"] = df_m["доход"].round(0).astype(int)
+        df_m["топливо"] = df_m["топливо"].round(0).astype(int)
+        df_m = df_m.sort_values("месяц")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Доход и прибыль, ₽**")
+            st.line_chart(df_m.set_index("месяц")[["доход","прибыль"]])
+        with col2:
+            st.markdown("**Заказов по месяцам**")
+            st.bar_chart(df_m.set_index("месяц")["заказов"])
+        st.markdown("**Детали по месяцам**")
+        df_show = df_m[["месяц","смен","заказов","доход","топливо","прибыль"]].sort_values("месяц", ascending=False)
+        st.dataframe(df_show, use_container_width=True, hide_index=True)
 
 # ===== UI: НАСТРОЙКИ =====
 def show_admin_page():
@@ -1435,6 +1774,9 @@ if __name__ == "__main__":
     # Обновляем сессионный файл при каждом заходе авторизованного пользователя
     save_session()
 
+    # Проверяем нужно ли восстановить данные (один раз после логина)
+    check_and_offer_restore()
+
     # ===== САЙДБАР =====
     with st.sidebar:
         profile = get_user_profile()
@@ -1471,6 +1813,8 @@ if __name__ == "__main__":
             st.session_state.page = "main"; st.rerun()
         if st.button("📊 Отчёты", use_container_width=True, type="primary" if page=="reports" else "secondary"):
             st.session_state.page = "reports"; st.rerun()
+        if st.button("📈 Статистика", use_container_width=True, type="primary" if page=="stats" else "secondary"):
+            st.session_state.page = "stats"; st.rerun()
         if st.button("🔧 Настройки", use_container_width=True, type="primary" if page=="admin" else "secondary"):
             st.session_state.page = "admin"; st.rerun()
         st.divider()
@@ -1480,4 +1824,5 @@ if __name__ == "__main__":
     page = st.session_state.get("page", "main")
     if page == "main": show_main_page()
     elif page == "reports": show_reports_page()
+    elif page == "stats": show_stats_page()
     elif page == "admin": show_admin_page()
