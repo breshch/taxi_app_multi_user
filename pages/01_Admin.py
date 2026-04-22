@@ -121,7 +121,7 @@ def parse_date_to_iso(v) -> Optional[str]:
     if hasattr(v, 'strftime'):
         try:
             return v.strftime("%Y-%m-%d")
-        except:
+        except Exception:
             pass
 
     if isinstance(v, (_dt, _date)):
@@ -360,7 +360,7 @@ def reset_db():
     try:
         backup_path = create_backup()
         st.info(f"📦 Создан бэкап перед сбросом: {os.path.basename(backup_path)}")
-    except:
+    except Exception:
         pass
     
     if os.path.exists(db_path):

@@ -176,7 +176,7 @@ def get_month_shifts_details_cached(year_month: str) -> pd.DataFrame:
 
         try:
             display_date = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m.%Y")
-        except:
+        except Exception:
             display_date = date_str
 
         rows.append(
@@ -390,7 +390,7 @@ else:
     
     try:
         selected_date = datetime.strptime(selected_date_display, "%d.%m.%Y").strftime("%Y-%m-%d")
-    except:
+    except Exception:
         selected_date = selected_date_display
 
     df_shift_summary = df_shifts[df_shifts["Дата"] == selected_date_display].copy()
